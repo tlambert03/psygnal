@@ -17,6 +17,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    NamedTuple,
     NoReturn,
     Optional,
     Tuple,
@@ -29,8 +30,7 @@ from typing import (
 from typing_extensions import Literal, get_args, get_origin, get_type_hints
 
 MethodRef = Tuple["weakref.ReferenceType[object]", str, Optional[Callable]]
-NormedCallback = Union[MethodRef, Callable]
-StoredSlot = Tuple[NormedCallback, Optional[int]]
+StoredSlot = Tuple[str, Callable, Optional[int]]
 ReducerFunc = Callable[[tuple, tuple], tuple]
 _NULL = object()
 
@@ -297,6 +297,7 @@ class SignalInstance:
         "_is_blocked",
         "_is_paused",
         "_args_queue",
+        "_stale_slots",
         "_lock",
         "_check_nargs_on_connect",
         "_check_types_on_connect",
@@ -331,6 +332,7 @@ class SignalInstance:
         self._is_blocked: bool = False
         self._is_paused: bool = False
         self._lock = threading.RLock()
+        self._stale_slots: List[str] = []
 
     @property
     def signature(self) -> Signature:
@@ -464,10 +466,20 @@ class SignalInstance:
                         extra = f"- Slot types {slot_sig} do not match types in signal."
                         self._raise_connection_error(slot, extra)
 
-                self._slots.append((_normalize_slot(slot), max_args))
+                self._store_slot(slot, max_args)
             return slot
 
         return _wrapper if slot is None else _wrapper(slot)
+
+    def _store_slot(
+        self, slot: Callable, max_args: Optional[int] = None, key: Optional[str] = None
+    ) -> None:
+        """Store a slot for later use."""
+        with self._lock:
+            safe_slot, _key = _normalize_slot(slot, self._stale_slots.append)
+            if key is None:
+                key = _key
+            self._slots.append((key, safe_slot, max_args))
 
     def connect_setattr(
         self,
@@ -530,7 +542,8 @@ class SignalInstance:
                 setattr(ref(), attr, args[0] if len(args) == 1 else args)
 
             normed_callback = (ref, attr, _slot)
-            self._slots.append((normed_callback, maxargs))
+            key = SLOT_KEY.format(obj_id=id(ref()), attr_name=attr)
+            self._store_slot(_slot, maxargs, key=key)
         return normed_callback
 
     def disconnect_setattr(
@@ -555,16 +568,8 @@ class SignalInstance:
             If `missing_ok` is `True` and no attribute setter is connected.
         """
         with self._lock:
-            idx = None
-            for i, (slot, _) in enumerate(self._slots):
-                if isinstance(slot, tuple):
-                    ref, name, _ = slot
-                    if ref() is obj and attr == name:
-                        idx = i
-                        break
-            if idx is not None:
-                self._slots.pop(idx)
-            elif not missing_ok:
+            key = SLOT_KEY.format(obj_id=id(obj), attr_name=attr)
+            if not self._disconnect_key(key) and not missing_ok:
                 raise ValueError(f"No attribute setter connected for {obj}.{attr}")
 
     def connect_setitem(
@@ -634,7 +639,8 @@ class SignalInstance:
                     _obj.__setitem__(key, args[0] if len(args) == 1 else args)
 
             normed_callback = (ref, key, _slot)
-            self._slots.append((normed_callback, maxargs))
+            _key = SLOT_KEY.format(obj_id=id(ref()), attr_name=key)
+            self._store_slot(_slot, maxargs, key=_key)
         return cast(MethodRef, normed_callback)
 
     def disconnect_setitem(
@@ -660,7 +666,7 @@ class SignalInstance:
         """
         with self._lock:
             idx = None
-            for i, (slot, _) in enumerate(self._slots):
+            for i, (slot, _, _) in enumerate(self._slots):
                 if isinstance(slot, tuple):
                     ref, name, _ = slot
                     if ref() is obj and key == name:
@@ -705,15 +711,13 @@ class SignalInstance:
         msg += f"\n\nAccepted signature: {self.signature}"
         raise ValueError(msg)
 
-    def _slot_index(self, slot: NormedCallback) -> int:
+    def _slot_index(self, slot: Union[Callable, str]) -> int:
         """Get index of `slot` in `self._slots`.  Return -1 if not connected."""
         with self._lock:
-            normed = _normalize_slot(slot)
-            return next((i for i, s in enumerate(self._slots) if s[0] == normed), -1)
+            key = slot if isinstance(slot, str) else _slot_key(slot)
+            return next((i for i, slt in enumerate(self._slots) if key == slt[0]), -1)
 
-    def disconnect(
-        self, slot: Optional[NormedCallback] = None, missing_ok: bool = True
-    ) -> None:
+    def disconnect(self, slot: Callable = None, missing_ok: bool = True) -> None:
         """Disconnect slot from signal.
 
         Parameters
@@ -742,7 +746,14 @@ class SignalInstance:
             elif not missing_ok:
                 raise ValueError(f"slot is not connected: {slot}")
 
-    def __contains__(self, slot: NormedCallback) -> bool:
+    def _disconnect_key(self, slot_key: str) -> bool:
+        for item in self._slots:
+            if item[0] == slot_key:
+                self._slots.remove(item)
+                return True
+        return False
+
+    def __contains__(self, slot: Callable) -> bool:
         """Return `True` if slot is connected."""
         return self._slot_index(slot) >= 0
 
@@ -875,33 +886,16 @@ class SignalInstance:
         )
 
     def _run_emit_loop(self, args: Tuple[Any, ...]) -> None:
-        rem: List[NormedCallback] = []
         # allow receiver to query sender with Signal.current_emitter()
         with self._lock:
             with Signal._emitting(self):
-                for (slot, max_args) in self._slots:
-                    if isinstance(slot, tuple):
-                        _ref, name, method = slot
-                        obj = _ref()
-                        if obj is None:
-                            rem.append(slot)  # add dead weakref
-                            continue
-                        if method is not None:
-                            cb = method
-                        else:
-                            _cb = getattr(obj, name, None)
-                            if _cb is None:  # pragma: no cover
-                                rem.append(slot)  # object has changed?
-                                continue
-                            cb = _cb
-                    else:
-                        cb = slot
+                for (_, slot, max_args) in self._slots:
 
                     # TODO: add better exception handling
-                    cb(*args[:max_args])
+                    slot(*args[:max_args])
 
-            for slot in rem:
-                self.disconnect(slot)
+            while self._stale_slots:
+                self._disconnect_key(self._stale_slots.pop())
 
         return None
 
@@ -1102,14 +1096,62 @@ def _build_signature(*types: Type[Any]) -> Signature:
     return Signature(params)
 
 
-def _normalize_slot(slot: Union[Callable, NormedCallback]) -> NormedCallback:
+class _SafeSlot(NamedTuple):
+    callback: Callable
+    obj_id: int
+    attr_name: str
+
+
+SLOT_KEY = "{obj_id}.{attr_name}"
+
+
+def _slot_key(slot: Callable) -> str:
     if isinstance(slot, MethodType):
-        return _get_method_name(slot) + (None,)
-    if isinstance(slot, PartialMethod):
-        return _partial_weakref(slot)
-    if isinstance(slot, tuple) and not isinstance(slot[0], weakref.ref):
-        return (weakref.ref(slot[0]), slot[1], slot[2])
-    return slot
+        ref, name = _get_method_name(slot)
+        obj = ref()
+    elif isinstance(slot, PartialMethod):
+        ref, name = _get_method_name(slot.func)
+        obj = ref()
+    else:
+        obj = slot
+        name = ""
+    return SLOT_KEY.format(obj_id=id(obj), attr_name=name)
+
+
+def _normalize_slot(slot: Callable, on_stale: Callable) -> Tuple[Callable, str]:
+    key = _slot_key(slot)
+
+    if isinstance(slot, MethodType):
+        ref, attr_name = _get_method_name(slot)
+
+        def _slot_wrapper(*args: Any) -> None:
+            obj = ref()
+            if obj is not None:
+                with suppress(AttributeError):
+                    getattr(obj, attr_name)(*args)
+                    return
+            on_stale(key)
+
+    elif isinstance(slot, partial) and isinstance(slot.func, MethodType):
+
+        ref, attr_name = _get_method_name(slot.func)  # TODO unrwrap fully
+
+        args_ = slot.args
+        kwargs_ = slot.keywords
+
+        def _slot_wrapper(*args: Any) -> None:
+            obj = ref()
+            if obj is not None:
+                with suppress(AttributeError):
+                    getattr(obj, attr_name)(*args_, *args, **kwargs_)
+                    return
+            on_stale(key)
+
+    elif callable(slot):
+        _slot_wrapper = slot
+    else:
+        raise TypeError(f"slot must be callable, got {type(slot)}")
+    return _slot_wrapper, key
 
 
 # def f(a, /, b, c=None, *d, f=None, **g): print(locals())
@@ -1225,18 +1267,6 @@ def _is_subclass(left: Type[Any], right: type) -> bool:
     if not isclass(left) and get_origin(left) is Union:
         return any(issubclass(i, right) for i in get_args(left))
     return issubclass(left, right)
-
-
-def _partial_weakref(slot_partial: PartialMethod) -> Tuple[weakref.ref, str, Callable]:
-    """For partial methods, make the weakref point to the wrapped object."""
-    ref, name = _get_method_name(slot_partial.func)
-    args_ = slot_partial.args
-    kwargs_ = slot_partial.keywords
-
-    def wrap(*args: Any, **kwargs: Any) -> Any:
-        getattr(ref(), name)(*args_, *args, **kwargs_, **kwargs)
-
-    return (ref, name, wrap)
 
 
 def _get_method_name(slot: MethodType) -> Tuple[weakref.ref, str]:

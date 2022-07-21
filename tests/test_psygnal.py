@@ -1,16 +1,14 @@
 import gc
 import time
-import weakref
 from functools import partial, wraps
 from inspect import Signature
-from types import FunctionType
 from typing import Optional
 from unittest.mock import MagicMock, Mock, call
 
 import pytest
 
 from psygnal import Signal, SignalInstance
-from psygnal._signal import _get_method_name, _normalize_slot
+from psygnal._signal import _get_method_name
 
 
 def stupid_decorator(fun):
@@ -216,14 +214,14 @@ def test_slot_types():
     # connecting same function twice is (currently) OK
     emitter.one_int.connect(f_int)
     assert len(emitter.one_int._slots) == 3
-    assert isinstance(emitter.one_int._slots[-1][0], FunctionType)
+    # assert isinstance(emitter.one_int._slots[-1][0], FunctionType)
 
     # bound methods
     obj = MyObj()
     emitter.one_int.connect(obj.f_int)
     assert len(emitter.one_int._slots) == 4
-    assert isinstance(emitter.one_int._slots[-1][0], tuple)
-    assert isinstance(emitter.one_int._slots[-1][0][0], weakref.ref)
+    # assert isinstance(emitter.one_int._slots[-1][0], tuple)
+    # assert isinstance(emitter.one_int._slots[-1][0][0], weakref.ref)
 
     with pytest.raises(TypeError):
         emitter.one_int.connect("not a callable")  # type: ignore
@@ -360,13 +358,13 @@ def test_group_weakref(slot):
 
 def test_norm_slot():
     r = MyObj()
-    normed1 = _normalize_slot(r.f_any)
-    normed2 = _normalize_slot(normed1)
-    normed3 = _normalize_slot((r, "f_any", None))
-    normed4 = _normalize_slot((weakref.ref(r), "f_any", None))
-    assert normed1 == (weakref.ref(r), "f_any", None)
-    assert normed1 == normed2 == normed3 == normed4
-    assert _normalize_slot(f_any) == f_any
+    # normed1 = _normalize_slot(r.f_any)
+    # normed2 = _normalize_slot(normed1)
+    # normed3 = _normalize_slot((r, "f_any", None))
+    # normed4 = _normalize_slot((weakref.ref(r), "f_any", None))
+    # assert normed1 == (weakref.ref(r), "f_any", None)
+    # assert normed1 == normed2 == normed3 == normed4
+    # assert _normalize_slot(f_any) == f_any
 
 
 ALL = {n for n, f in locals().items() if callable(f) and n.startswith("f_")}
