@@ -14,10 +14,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Dict,
     Iterator,
     List,
-    NamedTuple,
     NoReturn,
     Optional,
     Tuple,
@@ -471,14 +469,10 @@ class SignalInstance:
 
         return _wrapper if slot is None else _wrapper(slot)
 
-    def _store_slot(
-        self, slot: Callable, max_args: Optional[int] = None, key: Optional[str] = None
-    ) -> None:
+    def _store_slot(self, slot: Callable, max_args: Optional[int] = None) -> None:
         """Store a slot for later use."""
         with self._lock:
-            safe_slot, _key = _normalize_slot(slot, self._stale_slots.append)
-            if key is None:
-                key = _key
+            safe_slot, key = _normalize_slot(slot, self._stale_slots.append)
             self._slots.append((key, safe_slot, max_args))
 
     def connect_setattr(
@@ -537,14 +531,19 @@ class SignalInstance:
             raise AttributeError(f"Object {ref()} has no attribute {attr!r}")
 
         with self._lock:
+            key = SLOT_KEY.format(obj_id=id(ref()), attr_name=attr)
 
             def _slot(*args: Any) -> None:
-                setattr(ref(), attr, args[0] if len(args) == 1 else args)
+                obj = ref()
+                if obj is not None:
+                    with suppress(AttributeError):
+                        setattr(ref(), attr, args[0] if len(args) == 1 else args)
+                        return
+                self._stale_slots.append(key)
 
-            normed_callback = (ref, attr, _slot)
-            key = SLOT_KEY.format(obj_id=id(ref()), attr_name=attr)
-            self._store_slot(_slot, maxargs, key=key)
-        return normed_callback
+            self._slots.append((key, _slot, maxargs))
+
+        return key
 
     def disconnect_setattr(
         self, obj: object, attr: str, missing_ok: bool = True
@@ -577,7 +576,7 @@ class SignalInstance:
         obj: Union[weakref.ref, object],
         key: str,
         maxargs: Optional[int] = None,
-    ) -> MethodRef:
+    ) -> str:
         """Bind a container item (such as a dict key) to emitted value of this signal.
 
         Equivalent to calling `self.connect(functools.partial(obj.__setitem__, attr))`,
@@ -633,15 +632,18 @@ class SignalInstance:
 
         with self._lock:
 
+            _key = SLOT_KEY.format(obj_id=id(ref()), attr_name=key)
+
             def _slot(*args: Any) -> None:
                 _obj = ref()
-                if _obj:
-                    _obj.__setitem__(key, args[0] if len(args) == 1 else args)
+                if _obj is not None:
+                    _obj[key] = args[0] if len(args) == 1 else args
+                else:
+                    self._stale_slots.append(_key)
 
-            normed_callback = (ref, key, _slot)
-            _key = SLOT_KEY.format(obj_id=id(ref()), attr_name=key)
-            self._store_slot(_slot, maxargs, key=_key)
-        return cast(MethodRef, normed_callback)
+            self._slots.append((_key, _slot, maxargs))
+
+        return _key
 
     def disconnect_setitem(
         self, obj: object, key: str, missing_ok: bool = True
@@ -664,18 +666,11 @@ class SignalInstance:
         ValueError
             If `missing_ok` is `True` and no item setter is connected.
         """
+
         with self._lock:
-            idx = None
-            for i, (slot, _, _) in enumerate(self._slots):
-                if isinstance(slot, tuple):
-                    ref, name, _ = slot
-                    if ref() is obj and key == name:
-                        idx = i
-                        break
-            if idx is not None:
-                self._slots.pop(idx)
-            elif not missing_ok:
-                raise ValueError(f"No item setter connected for {obj}.{key}")
+            _key = SLOT_KEY.format(obj_id=id(obj), attr_name=key)
+            if not self._disconnect_key(_key) and not missing_ok:
+                raise ValueError
 
     def _check_nargs(
         self, slot: Callable, spec: Signature
@@ -894,8 +889,8 @@ class SignalInstance:
                     # TODO: add better exception handling
                     slot(*args[:max_args])
 
-            while self._stale_slots:
-                self._disconnect_key(self._stale_slots.pop())
+            for p in self._stale_slots:
+                self._disconnect_key(p)
 
         return None
 
@@ -1049,19 +1044,6 @@ class EmitThread(threading.Thread):
 # #############################################################################
 
 
-class PartialMethodMeta(type):
-    def __instancecheck__(cls, inst: object) -> bool:
-        return isinstance(inst, partial) and isinstance(inst.func, MethodType)
-
-
-class PartialMethod(metaclass=PartialMethodMeta):
-    """Bound method wrapped in partial: `partial(MyClass().some_method, y=1)`."""
-
-    func: MethodType
-    args: tuple
-    keywords: Dict[str, Any]
-
-
 def signature(obj: Any) -> inspect.Signature:
     try:
         return inspect.signature(obj)
@@ -1096,12 +1078,6 @@ def _build_signature(*types: Type[Any]) -> Signature:
     return Signature(params)
 
 
-class _SafeSlot(NamedTuple):
-    callback: Callable
-    obj_id: int
-    attr_name: str
-
-
 SLOT_KEY = "{obj_id}.{attr_name}"
 
 
@@ -1109,7 +1085,7 @@ def _slot_key(slot: Callable) -> str:
     if isinstance(slot, MethodType):
         ref, name = _get_method_name(slot)
         obj = ref()
-    elif isinstance(slot, PartialMethod):
+    elif isinstance(slot, partial) and isinstance(slot.func, MethodType):
         ref, name = _get_method_name(slot.func)
         obj = ref()
     else:
@@ -1126,7 +1102,7 @@ def _normalize_slot(slot: Callable, on_stale: Callable) -> Tuple[Callable, str]:
 
         def _slot_wrapper(*args: Any) -> None:
             obj = ref()
-            if obj is not None:
+            if obj is None:
                 with suppress(AttributeError):
                     getattr(obj, attr_name)(*args)
                     return
