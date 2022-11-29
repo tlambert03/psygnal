@@ -52,22 +52,22 @@ markdown_extensions:
   - toc:
       permalink: "#"
 
+watch:
+  - src/psygnal
+
 plugins:
   - search
   - autorefs
   - minify:
       minify_html: true
   - mkdocstrings:
-      watch:
-        - src/psygnal
       handlers:
         python:
           import:
             - https://docs.python.org/3/objects.inv
-          selection:
+          options:
             docstring_style: numpy
             filters: ["!^_"]
-          rendering:
             show_root_heading: true
             # show_root_toc_entry: true
             show_root_full_path: true
@@ -88,3 +88,7 @@ plugins:
             # line_length: 60
             # show_submodules: true
             docstring_section_style: list  # or table/list/spacy
+
+extra:
+  version:
+    provider: mike
