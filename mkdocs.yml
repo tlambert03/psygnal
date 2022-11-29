@@ -67,7 +67,7 @@ plugins:
             - https://docs.python.org/3/objects.inv
           options:
             docstring_style: numpy
-            filters: ["!^_"]
+            # filters: ["!^_"]
             show_root_heading: true
             # show_root_toc_entry: true
             show_root_full_path: true
