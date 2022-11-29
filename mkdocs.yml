@@ -58,6 +58,7 @@ watch:
 plugins:
   - search
   - autorefs
+  - mike
   - minify:
       minify_html: true
   - mkdocstrings:
@@ -87,6 +88,7 @@ plugins:
             # separate_signature: false
             # line_length: 60
             # show_submodules: true
+            show_source: false
             docstring_section_style: list  # or table/list/spacy
 
 extra:

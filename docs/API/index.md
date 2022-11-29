@@ -1,4 +1,4 @@
-# Core API
+# Signal API
 
 ::: psygnal.Signal
 ::: psygnal.SignalInstance
