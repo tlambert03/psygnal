@@ -11,6 +11,7 @@ from typing import (
     Dict,
     Iterator,
     Set,
+    Tuple,
     Type,
     Union,
     cast,
@@ -112,7 +113,7 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
         for n, f in fields.items():
             cls.__eq_operators__[n] = _pick_equality_operator(f.type_)
             if f.field_info.allow_mutation:
-                signals[n] = Signal(f.type_)
+                signals[n] = (f.type_,)
 
             # If a field type has a _json_encode method, add it to the json
             # encoders for this model.
@@ -138,7 +139,7 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
             for name, attr in namespace.items():
                 if isinstance(attr, property) and attr.fset is not None:
                     cls.__property_setters__[name] = attr
-                    signals[name] = Signal(object)
+                    signals[name] = (object,)
         else:
             for b in cls.__bases__:
                 conf = getattr(b, "__config__", None)
@@ -149,7 +150,7 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
                     )
 
         cls.__field_dependents__ = _get_field_dependents(cls)
-        cls.__signal_group__ = type(f"{name}SignalGroup", (SignalGroup,), signals)
+        cls.__signal_types__ = signals
         return cls
 
 
@@ -297,7 +298,7 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
     __field_dependents__: ClassVar[Dict[str, Set[str]]]
     __eq_operators__: ClassVar[Dict[str, EqOperator]]
     __slots__ = {"__weakref__"}
-    __signal_group__: ClassVar[Type[SignalGroup]]
+    __signal_types__: ClassVar[Dict[str, Tuple[Any, ...]]]
     # pydantic BaseModel configuration.  see:
     # https://pydantic-docs.helpmanual.io/usage/model_config/
 
@@ -307,7 +308,15 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
 
     def __init__(_model_self_, **data: Any) -> None:
         super().__init__(**data)
-        _model_self_._events = _model_self_.__signal_group__(_model_self_)
+        signals = {
+            k: SignalInstance(v, instance=_model_self_, name=k)
+            for k, v in _model_self_.__signal_types__.items()
+        }
+        _model_self_._events = SignalGroup(
+            instance=_model_self_,
+            name=f"{type(_model_self_).__name__}SignalGroup",
+            signals=signals,
+        )
 
     def _super_setattr_(self, name: str, value: Any) -> None:
         # pydantic will raise a ValueError if extra fields are not allowed

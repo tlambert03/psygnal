@@ -81,22 +81,23 @@ class SignalGroup(SignalInstance):
     ...     sig1 = Signal(str)  # not the same signature
     """
 
-    _signals_: ClassVar[Mapping[str, Signal]]
+    _cls_signals_: ClassVar[Mapping[str, Signal]] = {}
     _uniform: ClassVar[bool] = False
+    _signals_: Mapping[str, SignalInstance]
 
     def __len__(self) -> int:
         return len(self._slots)
 
     def __init_subclass__(cls, strict: bool = False) -> None:
         """Finds all Signal instances on the class and add them to `cls._signals_`."""
-        cls._signals_ = {}
+        cls._cls_signals_ = {}
         for k in dir(cls):
             v = getattr(cls, k)
             if isinstance(v, Signal):
-                cls._signals_[k] = v
+                cls._cls_signals_[k] = v
         _sigs = {
             tuple(p.annotation for p in s.signature.parameters.values())
-            for s in cls._signals_.values()
+            for s in cls._cls_signals_.values()
         }
         cls._uniform = len(_sigs) == 1
         if strict and not cls._uniform:
@@ -106,20 +107,29 @@ class SignalGroup(SignalInstance):
 
         return super().__init_subclass__()
 
-    def __init__(self, instance: Any = None, name: str | None = None) -> None:
+    def __init__(
+        self,
+        instance: Any = None,
+        name: str | None = None,
+        signals: dict[str, SignalInstance] | None = None,
+    ) -> None:
         super().__init__(
             signature=(EmissionInfo,),
             instance=instance,
             name=name or self.__class__.__name__,
         )
         self._sig_was_blocked: dict[str, bool] = {}
-        for _, sig in self.signals.items():
+        self._signals_ = {n: getattr(self, n) for n in type(self)._cls_signals_}
+        if signals is not None:
+            self._signals_.update(signals)
+        for k, sig in self.signals.items():
             sig.connect(self._slot_relay, check_nargs=False, check_types=False)
+            setattr(self, k, sig)
 
     @property
-    def signals(self) -> dict[str, SignalInstance]:
+    def signals(self) -> Mapping[str, SignalInstance]:
         """Return {name -> SignalInstance} map of all signal instances in this group."""
-        return {n: getattr(self, n) for n in type(self)._signals_}
+        return self._signals_
 
     @classmethod
     def is_uniform(cls) -> bool:

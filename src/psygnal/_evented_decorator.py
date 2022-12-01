@@ -278,7 +278,7 @@ def evented(
     def _decorate(cls: T) -> T:
         assert isinstance(cls, type), "evented can only be used on classes"
         Grp = _build_dataclass_signal_group(cls, _eqop)  # type: ignore
-        if not Grp._signals_:
+        if not Grp._cls_signals_:
             warnings.warn(
                 f"No mutable fields found in class {cls} no events will be emitted. "
                 "(Is this a dataclass, attrs, or pydantic model?)"
