@@ -291,7 +291,7 @@ class _SetattrCaller(WeakCallback):
         self._obj_ref = (
             obj if isinstance(obj, weakref.ReferenceType) else weakref.ref(obj)
         )
-        self._attr = attr
+        self._key = attr
         self._max_args = max_args
 
     def callback(self, args: tuple[Any, ...]) -> bool:
@@ -299,34 +299,34 @@ class _SetattrCaller(WeakCallback):
         if obj is None:
             return True
         args = self._prune_args(args)
-        setattr(obj, self._attr, args[0] if len(args) == 1 else args)
+        setattr(obj, self._key, args[0] if len(args) == 1 else args)
         return False
 
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, _SetattrCaller)
             and self._obj_ref == other._obj_ref
-            and self._attr == other._attr
+            and self._key == other._key
         )
 
     def slot(self) -> Callable:
         obj = self._obj_ref()
         if obj is None:
             raise RuntimeError("object has been deleted")
-        return partial(setattr, obj, self._attr)
+        return partial(setattr, obj, self._key)
 
 
 class _SetitemCaller(WeakCallback):
     """Caller to call __setitem__ on an object."""
 
     def __init__(
-        self, obj: weakref.ReferenceType | Any, attr: str, max_args: int | None = None
+        self, obj: weakref.ReferenceType | Any, key: Any, max_args: int | None = None
     ) -> None:
         self._obj_ref = (
             obj if isinstance(obj, weakref.ReferenceType) else weakref.ref(obj)
         )
         self._max_args = max_args
-        self._key = attr
+        self._key = key
 
     def callback(self, args: tuple[Any, ...]) -> bool:
         obj = self._obj_ref()

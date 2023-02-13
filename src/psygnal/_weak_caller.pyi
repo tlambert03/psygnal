@@ -31,5 +31,14 @@ class WeakCallback(Generic[P, R]):
         cls, func: Callable[P, R], max_args: int | None = None, key: str | None = None
     ) -> WeakCallback[P, R]: ...
 
-class _SetitemCaller(WeakCallback): ...
-class _SetattrCaller(WeakCallback): ...
+class _SetitemCaller(WeakCallback):
+    _key: str
+    def __init__(
+        self, obj: weakref.ReferenceType | Any, attr: str, max_args: int | None = None
+    ) -> None: ...
+
+class _SetattrCaller(WeakCallback):
+    _key: Any
+    def __init__(
+        self, obj: weakref.ReferenceType | Any, key: Any, max_args: int | None = None
+    ) -> None: ...

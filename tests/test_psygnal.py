@@ -12,6 +12,7 @@ import pytest
 
 from psygnal import EmitLoopError, Signal, SignalInstance, _compiled
 from psygnal._weak_caller import (
+    WeakCallback,
     _BoundMethodCaller,
     _FunctionCaller,
     _PartialMethodCaller,
@@ -244,7 +245,7 @@ def test_slot_types(type_: str) -> None:
     signal = emitter.one_int
     assert len(signal) == 0
     obj = MyObj()
-    caller_type: Type[WeakCaller]
+    caller_type: Type[WeakCallback]
 
     if type_ == "setattr":
         signal.connect_setattr(obj, "x")

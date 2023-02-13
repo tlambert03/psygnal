@@ -512,7 +512,7 @@ class SignalInstance:
             raise AttributeError(f"Object {ref()} has no attribute {attr!r}")
 
         with self._lock:
-            caller = _SetattrCaller(ref, attr, maxargs)
+            caller = _SetattrCaller(ref, attr, max_args=maxargs)
             self._slots.append(caller)
         return caller
 
@@ -542,7 +542,7 @@ class SignalInstance:
             idx = None
             for i, slot in enumerate(self._slots):
                 if isinstance(slot, _SetattrCaller):
-                    if slot._obj_ref() is obj and slot._attr == attr:
+                    if slot._obj_ref() is obj and slot._key == attr:
                         idx = i
                         break
 
@@ -682,7 +682,8 @@ class SignalInstance:
         with self._lock:
             normed = WeakCallback.create(slot)
             # NOTE:
-            # the == method here relies on the __eq__ method of each WeakCallback subclass
+            # the == method here relies on the __eq__ method of each WeakCallback
+            # subclass
             return next((i for i, s in enumerate(self._slots) if s == normed), -1)
 
     def disconnect(self, slot: Callable | None = None, missing_ok: bool = True) -> None:

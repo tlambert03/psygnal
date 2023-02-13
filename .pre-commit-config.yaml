@@ -41,7 +41,7 @@ repos:
     rev: v1.0.0
     hooks:
       - id: mypy
-        exclude: tests
+        exclude: tests|_weak_caller\.py
         additional_dependencies:
           - types-attrs
           - pydantic
