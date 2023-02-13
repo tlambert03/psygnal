@@ -1,6 +1,7 @@
 import weakref
 from functools import partial
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -22,9 +23,21 @@ def _make_ref_and_caller(
 def _assert_dead(ref: weakref.ref, caller: "WeakCallback[[int], Any]") -> None:
     assert not ref()
     assert not caller.is_alive()
-    assert caller.callback(VAL) is True
+    assert caller.callback((VAL,)) is True
     with pytest.raises(RuntimeError):
         caller(VAL)
+
+
+def test_weak_mock_caller():
+    # make sure mocks work when connected... for the sake of testing.
+    mock = Mock()
+    caller = WeakCallback.create(mock)
+    caller(1)
+    mock.assert_called_once_with(1)
+
+    mock.reset_mock()
+    caller.callback((2,))
+    mock.assert_called_once_with(2)
 
 
 def test_weak_function_caller() -> None:

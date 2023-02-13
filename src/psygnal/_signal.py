@@ -335,8 +335,9 @@ class SignalInstance:
 
     def __repr__(self) -> str:
         """Return repr."""
-        name = f" {self.name!r}" if self.name else ""
-        instance = f" on {self.instance!r}" if self.instance is not None else ""
+        name = f" {self._name!r}" if self._name else ""
+        _instance = self._instance()
+        instance = f" on {_instance!r}" if _instance is not None else ""
         return f"<{type(self).__name__}{name}{instance}>"
 
     @overload

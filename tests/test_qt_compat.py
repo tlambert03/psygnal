@@ -67,7 +67,7 @@ def test_connect_qt_signal_instance(qtbot):
         # making sure that qsig2.emit only receives and emits 1 value
         return value == 1
 
-    e.sig3.connect(q_obj.qsig2.emit)
+    e.sig3.connect(q_obj.qsig2.emit)  # cannot weakref q_obj here
     with qtbot.waitSignal(q_obj.qsig2, check_params_cb=test_receives_1):
         e.sig3.emit(1, 2)  # too many
 

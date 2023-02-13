@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import weakref
 from functools import partial
-from types import MethodType
+from types import BuiltinMethodType, MethodType
 from typing import TYPE_CHECKING, Any, Callable, Generic, Protocol, TypeVar, cast
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ class WeakCallback(Generic[R]):
     _obj_ref: weakref.ReferenceType[Any]
     _max_args: int | None = None
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         """Call the referenced function. Return True if weakref is dead.
 
         This implementation should be as fast as possible.
@@ -121,6 +121,8 @@ class WeakCallback(Generic[R]):
 
         if isinstance(func, MethodType):
             return _BoundMethodCaller(func, max_args)
+        elif isinstance(func, BuiltinMethodType):
+            return _BuiltinMethodCaller(func, max_args)
 
         return _FunctionCaller(func, max_args)
 
@@ -137,7 +139,12 @@ class _FunctionCaller(WeakCallback):
     """
 
     def __init__(self, func: Callable[..., R], max_args: int | None = None) -> None:
-        self._obj_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+        try:
+            self._obj_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+        except TypeError:
+            # func is not weakrefable, so we just store it
+            # TODO: warn?
+            self._obj_ref = lambda: func  # type: ignore[assignment]
         qname = getattr(func, "__qualname__", "")
         if (
             getattr(func, "__name__", None) == _LAMBDA_NAME
@@ -150,7 +157,7 @@ class _FunctionCaller(WeakCallback):
             self._func = func
         self._max_args = max_args
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         func = self._obj_ref()
         if func is None:
             return True
@@ -186,7 +193,7 @@ class _BoundMethodCaller(WeakCallback):
         )
         self._max_args = max_args
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         obj = self._obj_ref()
         func = self._func_ref()
         if obj is None or func is None:
@@ -221,6 +228,65 @@ class _BoundMethodCaller(WeakCallback):
         return method
 
 
+class _BuiltinMethodCaller(WeakCallback[R]):
+    """Caller of a (dereferenced) builtin bound method.
+
+    builtin methods don't have a __func__ attribute, so we need to handle them
+    separately.
+    """
+
+    def __init__(self, method: BuiltinMethodType, max_args: int | None = None) -> None:
+        try:
+            obj = method.__self__
+            func_name = method.__name__
+        except AttributeError:  # pragma: no cover
+            raise TypeError(
+                f"argument should be a builtin method, not {type(method)}"
+            ) from None
+
+        try:
+            self._obj_ref = weakref.ref(obj)
+        except TypeError:
+            # obj is not weakrefable, so we just store it
+            # TODO: warn?
+            self._obj_ref = lambda: obj  # type: ignore[assignment]
+        self._func_name = func_name
+        self._max_args = max_args
+
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
+        obj = self._obj_ref()
+        if obj is None:
+            return True
+        func = getattr(obj, self._func_name)
+        func(*self._prune_args(args))  # faster than self._method()(*args)
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _BuiltinMethodCaller)
+            and self._obj_ref == other._obj_ref
+            and self._func_name == other._func_name
+        )
+
+    def _method(self) -> Callable[..., R] | None:
+        """Reconstruct the original method.
+
+        Note: this isn't used above in __call__ because it's a bit slower
+        """
+        # sourcery skip: assign-if-exp, reintroduce-else
+        obj = self._obj_ref()
+        if obj is None:
+            return None
+        return cast("Callable[..., R]", getattr(obj, self._func_name))
+
+    def slot(self) -> Callable[..., R]:
+        """Return original method or raise RuntimeError if it has been deleted."""
+        method = self._method()
+        if method is None:
+            raise RuntimeError("object has been deleted")  # pragma: no cover
+        return method
+
+
 class _PartialMethodCaller(WeakCallback):
     """Caller of a partial to a (dereferenced) bound method."""
 
@@ -243,7 +309,7 @@ class _PartialMethodCaller(WeakCallback):
         self._partial_args = part.args
         self._partial_kwargs = part.keywords
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         obj = self._obj_ref()
         func = self._func_ref()
         if obj is None or func is None:
@@ -290,7 +356,7 @@ class _SetattrCaller(WeakCallback):
         self._key = attr
         self._max_args = max_args
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         obj = self._obj_ref()
         if obj is None:
             return True
@@ -324,7 +390,7 @@ class _SetitemCaller(WeakCallback):
         self._max_args = max_args
         self._key = key
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         obj = self._obj_ref()
         if obj is None:
             return True
@@ -412,7 +478,7 @@ class weak_partial(WeakCallback[R]):
             kwargs[k] = _v
         return kwargs
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         func = self._obj_ref()
         if func is None:
             return True

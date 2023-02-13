@@ -13,7 +13,7 @@ class WeakCallback(Generic[P, R]):
     _obj_ref: weakref.ReferenceType[Any]
     _max_args: int | None = None
 
-    def callback(self, args: tuple[Any, ...]) -> bool:
+    def callback(self, args: tuple[Any, ...] = ()) -> bool:
         """Call the referenced function. Return True if weakref is dead.
 
         This implementation should be as fast as possible.
