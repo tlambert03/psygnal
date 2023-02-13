@@ -1,0 +1,350 @@
+from __future__ import annotations
+
+import weakref
+from functools import partial
+from types import MethodType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Protocol,
+    TypeVar,
+    cast,
+)
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeGuard
+
+T = TypeVar("T")
+R = TypeVar("R")
+_LAMBDA_NAME = (lambda: None).__name__
+
+
+class BoundMethodType(Protocol[R]):
+    __self__: Any
+    __func__: Callable[..., R]
+    __name__: str
+
+    def __call__(self, *args: Any, **kwds: Any) -> R:
+        ...
+
+
+class PartialMethod(Protocol[R]):
+    """Protocol for a bound method wrapped in partial.
+
+    like: `partial(MyClass().some_method, y=1)`.
+
+    We use this instead of partial[] so that we can specify what `func` is.
+    """
+
+    func: BoundMethodType[R]
+    args: tuple[Any, ...]
+    keywords: dict[str, Any]
+
+    def __call__(self, *args: Any, **kwds: Any) -> R:
+        ...
+
+
+def _is_partial_method(obj: object) -> TypeGuard[PartialMethod]:
+    """Return `True` of `obj` is a `functools.partial` wrapping a bound method."""
+    return isinstance(obj, partial) and isinstance(obj.func, MethodType)
+
+
+class WeakCallback(Generic[R]):
+    """ABC for a "stored" slot.
+
+    !!! note
+
+        We're not using a real ABC here because PySide is doing some weird stuff
+        that causes mypyc to complain with:
+
+            src/psygnal/_signal.py:1108: in <module>
+                class WeakCaller(ABC):
+            E   TypeError: mypyc classes can't have a metaclass
+
+        ...but *only* when PySide2 is imported (not with PyQt5).
+
+    A WeakCaller is responsible for actually calling a stored slot during the
+    `run_emit_loop`.  It is used to allow for different types of slots to be stored
+    in a `SignalInstance` (such as a function, a bound method, a partial to a bound
+    method), while still allowing them to be called in the same way.
+
+    The main reason is that some slot types need to derefence a weakref during
+    call time, while others don't.
+    """
+
+    _obj_ref: weakref.ReferenceType[Any]
+    _max_args: int | None = None
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        """Call the referenced function. Return True if weakref is dead.
+
+        This implementation should be as fast as possible.
+        """
+        raise NotImplementedError()
+
+    def _prune_args(self, args: tuple) -> tuple[Any, ...]:
+        return args[: self._max_args] if self._max_args is not None else args
+
+    def __call__(self, *args: Any, **kwargs: Any) -> R:
+        """Call the referenced function.  Raise a RuntimeError if it is dead."""
+        return self.slot()(*self._prune_args(args))
+
+    def __eq__(self, other: object) -> bool:
+        """Return True if `other` is equal to this WeakCaller."""
+        raise NotImplementedError()
+
+    def slot(self) -> Callable[..., R]:
+        """Reconstruct the original slot, or raise a RuntimeError."""
+        raise NotImplementedError()
+
+    def is_alive(self) -> bool:
+        """Return True if the slot is still alive."""
+        return self._obj_ref() is not None
+
+    @classmethod
+    def create(
+        cls, func: Callable[..., R], max_args: int | None = None, key: str | None = None
+    ) -> WeakCallback[R]:
+        """Factory function to return a `WeakCaller` appropriate for `func`."""
+        if isinstance(func, WeakCallback):
+            return func
+        if _is_partial_method(func):
+            return _PartialMethodCaller(func, max_args)
+
+        slot_name = getattr(func, "__name__", None)
+        if key is not None and slot_name is not None:
+            for method, caller_cls in (
+                ("__setattr__", _SetattrCaller),
+                ("__setitem__", _SetitemCaller),
+            ):
+                if method == slot_name:
+                    if not hasattr(func, "__self__"):  # pragma: no cover
+                        raise TypeError(
+                            f"Cannot use {method} as a weak callback unless it is a "
+                            "bound method."
+                        )
+                    return caller_cls(func.__self__, key, max_args)
+
+        if isinstance(func, MethodType):
+            return _BoundMethodCaller(func, max_args)
+
+        return _FunctionCaller(func, max_args)
+
+
+class _FunctionCaller(WeakCallback):
+    """Simple caller of a plain function.
+
+    Currently, this does not reference the function at all, so it will not prevent
+    it from being garbage collected.
+    """
+
+    def __init__(self, func: Callable[..., R], max_args: int | None = None) -> None:
+        self._obj_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+        qname = getattr(func, "__qualname__", "")
+        if (
+            getattr(func, "__name__", None) == _LAMBDA_NAME
+            or "pyqtBoundSignal.emit" in qname
+            or "SignalInstance.emit" in qname
+        ):
+            # special cases:
+            # store a reference to the function for lambda functions, and for
+            # pyqtBoundSignal.emit
+            self._func = func
+        self._max_args = max_args
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        func = self._obj_ref()
+        if func is None:
+            return True
+        func(*self._prune_args(args))
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _FunctionCaller) and self._obj_ref == other._obj_ref
+
+    def slot(self) -> Callable[..., R]:
+        func = self._obj_ref()
+        if func is None:
+            raise RuntimeError("function has been deleted")
+        return func
+
+
+class _BoundMethodCaller(WeakCallback):
+    """Caller of a (dereferenced) bound method."""
+
+    def __init__(self, method: BoundMethodType[R], max_args: int | None = None) -> None:
+        try:
+            obj = method.__self__
+            func = method.__func__
+        except AttributeError:  # pragma: no cover
+            raise TypeError(
+                f"argument should be a bound method, not {type(method)}"
+            ) from None
+
+        self._obj_ref = weakref.ref(obj)
+        self._func_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+        self._method_type = cast(
+            Callable[[Callable[..., R], Any], BoundMethodType[R]], type(method)
+        )
+        self._max_args = max_args
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        obj = self._obj_ref()
+        func = self._func_ref()
+        if obj is None or func is None:
+            return True
+        func(obj, *self._prune_args(args))  # faster than self._method()(*args)
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _BoundMethodCaller)
+            and self._obj_ref == other._obj_ref
+            and self._func_ref == other._func_ref
+        )
+
+    def _method(self) -> BoundMethodType[R] | None:
+        """Reconstruct the original method.
+
+        Note: this isn't used above in __call__ because it's a bit slower
+        """
+        # sourcery skip: assign-if-exp, reintroduce-else
+        obj = self._obj_ref()
+        func = self._func_ref()
+        if obj is None or func is None:
+            return None
+        return self._method_type(func, obj)
+
+    def slot(self) -> BoundMethodType[R]:
+        """Return original method or raise RuntimeError if it has been deleted."""
+        method: BoundMethodType[R] | None = self._method()
+        if method is None:
+            raise RuntimeError("object has been deleted")  # pragma: no cover
+        return method
+
+
+class _PartialMethodCaller(WeakCallback):
+    """Caller of a partial to a (dereferenced) bound method."""
+
+    def __init__(self, part: PartialMethod[R], max_args: int | None = None) -> None:
+        method = part.func
+        try:
+            obj = method.__self__
+            func = method.__func__
+        except AttributeError:  # pragma: no cover
+            raise TypeError(
+                f"argument should be a bound method, not {type(method)}"
+            ) from None
+
+        self._obj_ref = weakref.ref(obj)
+        self._func_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+        self._method_type = cast(
+            Callable[[Callable[..., R], Any], BoundMethodType[R]], type(method)
+        )
+        self._max_args = max_args
+        self._partial_args = part.args
+        self._partial_kwargs = part.keywords
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        obj = self._obj_ref()
+        func = self._func_ref()
+        if obj is None or func is None:
+            return True
+        func(obj, *self._partial_args, *self._prune_args(args), **self._partial_kwargs)
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _PartialMethodCaller)
+            and self._obj_ref == other._obj_ref
+            and self._func_ref == other._func_ref
+        )
+
+    def _method(self) -> BoundMethodType[R] | None:
+        """Reconstruct the original method.
+
+        Note: this isn't used above in __call__ because it's a bit slower
+        """
+        # sourcery skip: assign-if-exp, reintroduce-else
+        obj = self._obj_ref()
+        func = self._func_ref()
+        if obj is None or func is None:
+            return None
+        return self._method_type(func, obj)
+
+    def slot(self) -> PartialMethod[R]:
+        method: BoundMethodType[R] | None = self._method()
+        if method is None:
+            raise RuntimeError("object has been deleted")  # pragma: no cover
+        _partial = partial(method, *self._partial_args, **self._partial_kwargs)
+        return cast("PartialMethod[R]", _partial)
+
+
+class _SetattrCaller(WeakCallback):
+    """Caller to set an attribute on an object."""
+
+    def __init__(
+        self, obj: weakref.ReferenceType | Any, attr: str, max_args: int | None = None
+    ) -> None:
+        self._obj_ref = (
+            obj if isinstance(obj, weakref.ReferenceType) else weakref.ref(obj)
+        )
+        self._attr = attr
+        self._max_args = max_args
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        obj = self._obj_ref()
+        if obj is None:
+            return True
+        args = self._prune_args(args)
+        setattr(obj, self._attr, args[0] if len(args) == 1 else args)
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _SetattrCaller)
+            and self._obj_ref == other._obj_ref
+            and self._attr == other._attr
+        )
+
+    def slot(self) -> Callable:
+        obj = self._obj_ref()
+        if obj is None:
+            raise RuntimeError("object has been deleted")
+        return partial(setattr, obj, self._attr)
+
+
+class _SetitemCaller(WeakCallback):
+    """Caller to call __setitem__ on an object."""
+
+    def __init__(
+        self, obj: weakref.ReferenceType | Any, attr: str, max_args: int | None = None
+    ) -> None:
+        self._obj_ref = (
+            obj if isinstance(obj, weakref.ReferenceType) else weakref.ref(obj)
+        )
+        self._max_args = max_args
+        self._key = attr
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        obj = self._obj_ref()
+        if obj is None:
+            return True
+        args = self._prune_args(args)
+        obj[self._key] = args[0] if len(args) == 1 else args
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _SetitemCaller)
+            and self._obj_ref == other._obj_ref
+            and self._key == other._key
+        )
+
+    def slot(self) -> Callable:
+        obj = self._obj_ref()
+        if obj is None:
+            raise RuntimeError("object has been deleted")
+        return partial(obj.__setitem__, self._key)

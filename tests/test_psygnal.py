@@ -11,8 +11,7 @@ from weakref import ref
 import pytest
 
 from psygnal import EmitLoopError, Signal, SignalInstance, _compiled
-from psygnal._signal import (
-    SlotCaller,
+from psygnal._weak_caller import (
     _BoundMethodCaller,
     _FunctionCaller,
     _PartialMethodCaller,
@@ -245,7 +244,7 @@ def test_slot_types(type_: str) -> None:
     signal = emitter.one_int
     assert len(signal) == 0
     obj = MyObj()
-    caller_type: Type[SlotCaller]
+    caller_type: Type[WeakCaller]
 
     if type_ == "setattr":
         signal.connect_setattr(obj, "x")
@@ -857,26 +856,18 @@ def test_emit_loop_exceptions():
 )
 def test_weakref_disconnect(slot):
     """Test that a connected method doesn't hold strong ref."""
-    from psygnal._signal import _PARTIAL_CACHE, _prune_partial_cache
-
     emitter = Emitter()
     obj = MyObj()
 
-    _prune_partial_cache()
-    assert not _PARTIAL_CACHE
-
     assert len(emitter.one_int) == 0
     cb = partial(obj.f_int_int, 1) if slot == "partial" else getattr(obj, slot)
-    cb_id = id(cb)
-    assert cb_id not in _PARTIAL_CACHE
+
     emitter.one_int.connect(cb)
-    assert (cb_id in _PARTIAL_CACHE) == (slot == "partial")
     assert len(emitter.one_int) == 1
     emitter.one_int.emit(1)
     assert len(emitter.one_int) == 1
     emitter.one_int.disconnect(cb)
     assert len(emitter.one_int) == 0
-    assert cb_id not in _PARTIAL_CACHE
 
 
 def test_multiple_bound_methods():
@@ -946,7 +937,7 @@ def test_multiple_bound_methods():
     assert not e.one_int._slots
 
 
-def test_slot_caller_equality():
+def test_weak_caller_equality():
     """Slot callers should be equal only if they represent the same bound-method."""
 
     class T:
