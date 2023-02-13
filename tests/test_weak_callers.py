@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from psygnal import WeakCallback
+from psygnal._weak_caller import weak_partial
 
 VAL = 42
 
@@ -79,3 +80,41 @@ def test_weak_setitem_caller() -> None:
     ref, caller = _make_ref_and_caller(foo, foo.__setitem__, key="x", returns=None)
     del foo
     _assert_dead(ref, caller)
+
+
+def test_weak_partial() -> None:
+    class T:
+        ...
+
+    class C:
+        def func(self, obj: T, x: Any, *, y: Any) -> T:
+            self.x = x
+            self.y = y
+            return obj
+
+    t = T()
+    c = C()
+
+    ref_t = weakref.ref(t)
+
+    # t is closed over by the partial, so it would otherwise not be collected
+    caller = weak_partial(c.func, t, y="y")
+    # also works with a regular functools.partial
+    caller2 = weak_partial(partial(c.func, t, y="y"))
+    assert caller("x") is t
+    assert c.x == "x"
+    assert c.y == "y"
+    assert caller2("w") is t
+    assert c.x == "w"
+
+    del t
+    assert not ref_t()
+
+    assert not caller.is_alive()
+    assert not caller2.is_alive()
+    assert caller.callback(("z",)) is True
+    assert caller2.callback(("z",)) is True
+    with pytest.raises(RuntimeError):
+        caller("x")
+    with pytest.raises(RuntimeError):
+        caller2("x")

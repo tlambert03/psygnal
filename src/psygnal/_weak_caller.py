@@ -132,6 +132,10 @@ class WeakCallback(Generic[R]):
 
         return _FunctionCaller(func, max_args)
 
+    @classmethod
+    def partial(cls, func: Callable[..., R], *args: Any, **kwargs: Any) -> weak_partial:
+        return weak_partial(func, *args, **kwargs)
+
 
 class _FunctionCaller(WeakCallback):
     """Simple caller of a plain function.
@@ -348,3 +352,103 @@ class _SetitemCaller(WeakCallback):
         if obj is None:
             raise RuntimeError("object has been deleted")
         return partial(obj.__setitem__, self._key)
+
+
+def _try_ref(obj: T) -> Callable[[], T | None] | None:
+    if obj is None:
+        return None
+    try:
+        return weakref.ref(obj)
+    except TypeError:
+        return lambda: obj
+
+
+class weak_partial(WeakCallback[R]):
+    def __init__(self, func: Callable[..., R], *args: Any, **kwargs: Any) -> None:
+        if not callable(func):
+            raise TypeError("the first argument must be callable")
+
+        if isinstance(func, partial):
+            args = func.args + args
+            kwargs = {**func.keywords, **kwargs}
+            func = func.func
+
+        self._obj_ref: weakref.ReferenceType | None = None  # type: ignore
+        self._method_type: Callable[..., Callable[..., R]] | None = None
+        if isinstance(func, MethodType):
+            self._method_type = type(func)
+            self._obj_ref = weakref.ref(func.__self__)
+            func = func.__func__
+
+        self._func_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+        self._args = tuple(_try_ref(arg) for arg in args)
+        self._kwargs = {k: _try_ref(v) for k, v in kwargs.items()}
+
+    @property
+    def func(self) -> Callable[..., R] | None:
+        func = self._func_ref()
+        if func is None:
+            return None
+        if self._obj_ref is not None:
+            obj = self._obj_ref()
+            return None if obj is None else self._method_type(func, obj)  # type: ignore
+        return self._func_ref()
+
+    @property
+    def args(self) -> tuple[Any, ...]:
+        args = []
+        for arg in self._args:
+            if arg is not None:
+                _arg = arg()
+                if _arg is None:
+                    raise RuntimeError("object in args has been deleted")
+            else:
+                _arg = None
+            args.append(_arg)
+        return tuple(args)
+
+    @property
+    def keywords(self) -> dict[str, Any]:
+        kwargs = {}
+        for k, v in self._kwargs.items():
+            if v is not None:
+                _v = v()
+                if _v is None:
+                    raise RuntimeError("object in kwargs has been deleted")
+            else:
+                _v = None
+            kwargs[k] = _v
+        return kwargs
+
+    def callback(self, args: tuple[Any, ...]) -> bool:
+        func = self._func_ref()
+        if func is None:
+            return True
+        try:
+            args = self.args + args
+            kwargs = self.keywords
+        except RuntimeError:
+            return True
+
+        if self._obj_ref is not None:
+            # bound method
+            obj = self._obj_ref()
+            if obj is None:
+                return True
+            args = (obj, *args)
+
+        func(*args, **kwargs)
+        return False
+
+    def __call__(self, *args: Any, **kwargs: Any) -> R:
+        func = self.func
+        if func is None:
+            raise RuntimeError("object has been deleted")
+        return func(*self.args, *args, **{**self.keywords, **kwargs})
+
+    def is_alive(self) -> bool:
+        try:
+            self.args
+        except RuntimeError:
+            return False
+        return super().is_alive() and self.func is not None

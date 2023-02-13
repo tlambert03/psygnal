@@ -30,6 +30,10 @@ class WeakCallback(Generic[P, R]):
     def create(
         cls, func: Callable[P, R], max_args: int | None = None, key: str | None = None
     ) -> WeakCallback[P, R]: ...
+    @classmethod
+    def partial(
+        cls, func: Callable[..., R], *args: Any, **kwargs: Any
+    ) -> weak_partial: ...
 
 class _SetitemCaller(WeakCallback):
     _key: str
@@ -42,3 +46,6 @@ class _SetattrCaller(WeakCallback):
     def __init__(
         self, obj: weakref.ReferenceType | Any, key: Any, max_args: int | None = None
     ) -> None: ...
+
+class weak_partial(WeakCallback[R]):
+    def __init__(self, func: Callable[..., R], *args: Any, **kwargs: Any) -> None: ...
