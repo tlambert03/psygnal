@@ -103,6 +103,7 @@ dependencies = [
 include = [
     "src/psygnal/_signal.py",
     "src/psygnal/_group.py",
+    "src/psygnal/_weak_caller.py",
     "src/psygnal/_evented_decorator.py",
 ]
 

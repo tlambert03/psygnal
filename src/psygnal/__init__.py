@@ -53,9 +53,11 @@ __all__ = [
     "SignalGroup",
     "SignalInstance",
     "throttled",
+    "WeakCallback",
 ]
 
 from ._evented_decorator import evented, get_evented_namespace, is_evented
+from ._weak_caller import WeakCallback
 
 if os.getenv("PSYGNAL_UNCOMPILED"):
 
