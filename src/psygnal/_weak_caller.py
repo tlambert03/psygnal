@@ -3,22 +3,14 @@ from __future__ import annotations
 import weakref
 from functools import partial
 from types import MethodType
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Generic,
-    Protocol,
-    TypeVar,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, Callable, Generic, Protocol, TypeVar, cast
 
 if TYPE_CHECKING:
     from typing_extensions import TypeGuard
 
 T = TypeVar("T")
 R = TypeVar("R")
-_LAMBDA_NAME = (lambda: None).__name__
+_LAMBDA_NAME = "<lambda>"  # (lambda: None).__name__ won't compile with mypyc
 
 
 class BoundMethodType(Protocol[R]):
@@ -373,26 +365,26 @@ class weak_partial(WeakCallback[R]):
             kwargs = {**func.keywords, **kwargs}
             func = func.func
 
-        self._obj_ref: weakref.ReferenceType | None = None  # type: ignore
+        self._self_ref: weakref.ReferenceType[Any] | None = None
         self._method_type: Callable[..., Callable[..., R]] | None = None
         if isinstance(func, MethodType):
             self._method_type = type(func)
-            self._obj_ref = weakref.ref(func.__self__)
-            func = func.__func__
-
-        self._func_ref: weakref.ReferenceType[Callable[..., R]] = weakref.ref(func)
+            self._self_ref = weakref.ref(func.__self__)
+            self._obj_ref = weakref.ref(func.__func__)
+        else:
+            self._obj_ref = weakref.ref(func)
         self._args = tuple(_try_ref(arg) for arg in args)
         self._kwargs = {k: _try_ref(v) for k, v in kwargs.items()}
 
     @property
     def func(self) -> Callable[..., R] | None:
-        func = self._func_ref()
+        func = self._obj_ref()
         if func is None:
             return None
-        if self._obj_ref is not None:
-            obj = self._obj_ref()
-            return None if obj is None else self._method_type(func, obj)  # type: ignore
-        return self._func_ref()
+        if self._method_type is not None:
+            obj = cast("weakref.ReferenceType[Any]", self._self_ref)()
+            return None if obj is None else self._method_type(func, obj)
+        return self._obj_ref()
 
     @property
     def args(self) -> tuple[Any, ...]:
@@ -421,7 +413,7 @@ class weak_partial(WeakCallback[R]):
         return kwargs
 
     def callback(self, args: tuple[Any, ...]) -> bool:
-        func = self._func_ref()
+        func = self._obj_ref()
         if func is None:
             return True
         try:
@@ -430,9 +422,9 @@ class weak_partial(WeakCallback[R]):
         except RuntimeError:
             return True
 
-        if self._obj_ref is not None:
+        if self._method_type is not None:
             # bound method
-            obj = self._obj_ref()
+            obj = cast("weakref.ReferenceType[Any]", self._self_ref)()
             if obj is None:
                 return True
             args = (obj, *args)
