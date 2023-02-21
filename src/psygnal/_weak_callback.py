@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import weakref
 from functools import partial
 from types import BuiltinMethodType, FunctionType, MethodType, MethodWrapperType
@@ -23,7 +24,7 @@ def weak_callback(
     *args: Any,
     max_args: int | None = None,
     finalize: Callable[[WeakCallback], Any] | None = None,
-    strong_func: bool = True,
+    keep_last_ref: bool = True,
     on_ref_error: RefErrorChoice = "warn",
 ) -> WeakCallback[_R]:
     """Create a weakly-referenced callback.
@@ -49,13 +50,13 @@ def weak_callback(
     finalize : callable, optional
         A callable that will be called when the callback is garbage collected.
         The callable will be passed the WeakCallback instance as its only argument.
-    strong_func : bool, optional
-        If True (default), a strong reference will be kept to the function `cb` if
-        it is a function or lambda.  If False, a weak reference will be kept.  The
-        reasoning for this is that functions and lambdas are very often defined *only*
-        to be passed to this function, and would likely be immediately garbage
-        collected if we weakly referenced them. If you would specifically like to
-        *allow* the function to be garbage collected, set this to False.
+    keep_last_ref : bool, optional
+        If True (default), a strong reference will be kept to the function `cb` if there
+        are no other remaining references to it. The reasoning for this is that
+        functions and lambdas are very often defined *only* to be passed to this
+        function, and would likely be immediately garbage collected if we weakly
+        referenced them. If you would specifically like to *allow* the function to be
+        garbage collected, set this to False.
     on_ref_error : {'raise', 'warn', 'ignore'}, optional
         What to do if a weak reference cannot be created.  If 'raise', a
         ReferenceError will be raised.  If 'warn' (default), a warning will be issued
@@ -95,16 +96,26 @@ def weak_callback(
     if isinstance(cb, WeakCallback):
         return cb
 
+
     kwargs: dict[str, Any] | None = None
     if isinstance(cb, partial):
         args = cb.args + args
         kwargs = cb.keywords
         cb = cb.func
 
+    # check if we are the only remaining reference
+    # one reference is the cb argument, one is the sys.getrefcount call.
+    # in the case of a function/lambda, a third reference comes from the temp variable
+    # from the last stack passed to this function. (bound methods won't have this)
+    if hasattr(cb, "__self__"):
+        _is_last_ref = sys.getrefcount(cb.__self__) <= 2
+    else:
+        _is_last_ref = sys.getrefcount(cb) <= 3
+
     if isinstance(cb, FunctionType):
         return (
             _StrongFunction(cb, max_args, args, kwargs)
-            if strong_func
+            if _is_last_ref and keep_last_ref
             else _WeakFunction(cb, max_args, args, kwargs, finalize, on_ref_error)
         )
 

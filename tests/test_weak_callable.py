@@ -53,7 +53,7 @@ def test_slot_types(type_: str, capsys) -> None:
             mock(x)
             return x
 
-        cb = weak_callback(obj, strong_func=(type_ == "function"), finalize=final_mock)
+        cb = weak_callback(obj, keep_last_ref=(type_ == "function"), finalize=final_mock)
     elif type_ == "lambda":
         cb = weak_callback(lambda x: mock(x) and x, finalize=final_mock)
     elif type_ == "method":
@@ -82,6 +82,7 @@ def test_slot_types(type_: str, capsys) -> None:
         assert result == 2
     mock.assert_called_once_with(2)
 
+    print("obj", cb.dereference())
     del obj
 
     if type_ not in ("function", "lambda", "mock"):
@@ -157,7 +158,7 @@ def test_deref(strong: bool) -> None:
         ...
 
     p = partial(func, 1)
-    cb = weak_callback(p, strong_func=strong)
+    cb = weak_callback(p, keep_last_ref=strong)
     dp = cb.dereference()
 
     assert dp.func is p.func
