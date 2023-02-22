@@ -6,7 +6,17 @@ import sys
 import warnings
 import weakref
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Type, TypeVar, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Collection,
+    Iterable,
+    Type,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from typing_extensions import Literal
 
@@ -110,13 +120,17 @@ def _pick_equality_operator(type_: type | None) -> EqOperator:
 
 @lru_cache(maxsize=None)
 def _build_dataclass_signal_group(
-    cls: type, equality_operators: Iterable[tuple[str, EqOperator]] | None = None
+    cls: type,
+    equality_operators: Iterable[tuple[str, EqOperator]] | None = None,
+    field_names: frozenset[str] | None = None,
 ) -> type[SignalGroup]:
     """Build a SignalGroup with events for each field in a dataclass."""
     _equality_operators = dict(equality_operators) if equality_operators else {}
     signals = {}
     eq_map = _get_eq_operator_map(cls)
-    for name, type_ in iter_fields(cls):
+
+    fields = ((n, None) for n in field_names) if field_names else iter_fields(cls)
+    for name, type_ in fields:
         if name in _equality_operators:
             if not callable(_equality_operators[name]):  # pragma: no cover
                 raise TypeError("EqOperator must be callable")
@@ -337,6 +351,7 @@ class SignalGroupDescriptor:
         warn_on_no_fields: bool = True,
         cache_on_instance: bool = True,
         patch_setattr: bool = True,
+        field_names: Collection[str] | None = None,
     ):
         self._signal_group = signal_group_class
         self._name: str | None = None
@@ -344,6 +359,9 @@ class SignalGroupDescriptor:
         self._warn_on_no_fields = warn_on_no_fields
         self._cache_on_instance = cache_on_instance
         self._patch_setattr = patch_setattr
+        self._field_names: frozenset[str] = (
+            frozenset() if field_names is None else frozenset(field_names)
+        )
 
     def __set_name__(self, owner: type, name: str) -> None:
         """Called when this descriptor is added to class `owner` as attribute `name`."""
@@ -413,7 +431,9 @@ class SignalGroupDescriptor:
         return self._instance_map[obj_id]
 
     def _create_group(self, owner: type) -> type[SignalGroup]:
-        Group = self._signal_group or _build_dataclass_signal_group(owner, self._eqop)
+        Group = self._signal_group or _build_dataclass_signal_group(
+            owner, self._eqop, self._field_names
+        )
         if self._warn_on_no_fields and not Group._signals_:
             warnings.warn(
                 f"No mutable fields found on class {owner}: no events will be "
