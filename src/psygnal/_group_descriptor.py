@@ -125,6 +125,10 @@ def _build_dataclass_signal_group(
             eq_map[name] = _pick_equality_operator(type_)
         signals[name] = Signal(object if type_ is None else type_)
 
+    # for EventedModel ...
+    for name in getattr(cls, "__property_setters__", ()):
+        signals[name] = Signal(object)
+
     return type(f"{cls.__name__}SignalGroup", (SignalGroup,), signals)
 
 
@@ -163,14 +167,17 @@ class _changes_emitted:
         self.obj = obj
         self.field = field
         self.signal = signal
+        self.changed: bool = False
 
-    def __enter__(self) -> None:
+    def __enter__(self) -> _changes_emitted:
         self._prev = getattr(self.obj, self.field, _NULL)
+        return self
 
     def __exit__(self, *args: Any) -> None:
         new: Any = getattr(self.obj, self.field, _NULL)
         if not _check_field_equality(type(self.obj), self.field, self._prev, new):
             self.signal.emit(new)
+            self.changed = True
 
 
 SetAttr = Callable[[Any, str, Any], None]

@@ -16,12 +16,17 @@ from typing import (
 )
 
 import pydantic.main
-from pydantic import BaseModel, PrivateAttr, utils
+from pydantic import BaseModel, utils
 from pydantic.fields import Field, FieldInfo
 
-from ._group import SignalGroup
-from ._group_descriptor import _check_field_equality, _pick_equality_operator
-from ._signal import Signal, SignalInstance
+from psygnal import SignalGroupDescriptor
+
+from ._group_descriptor import (
+    _NULL,
+    _changes_emitted,
+    _check_field_equality,
+    _pick_equality_operator,
+)
 
 if TYPE_CHECKING:
     from inspect import Signature
@@ -40,7 +45,6 @@ else:
             return lambda a: a
 
 
-_NULL = object()
 ALLOW_PROPERTY_SETTERS = "allow_property_setters"
 PROPERTY_DEPENDENCIES = "property_dependencies"
 GUESS_PROPERTY_DEPENDENCIES = "guess_property_dependencies"
@@ -112,15 +116,14 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
     ) -> "EventedMetaclass":
         """Create new EventedModel class."""
         with no_class_attributes():
-            cls = super().__new__(mcs, name, bases, namespace, **kwargs)
+            cls: Type[pydantic.main.BaseModel] = super().__new__(
+                mcs, name, bases, namespace, **kwargs
+            )
 
         cls.__eq_operators__ = {}
-        signals = {}
         fields: Dict[str, "ModelField"] = cls.__fields__
         for n, f in fields.items():
             cls.__eq_operators__[n] = _pick_equality_operator(f.type_)
-            if f.field_info.allow_mutation:
-                signals[n] = Signal(f.type_)
 
             # If a field type has a _json_encode method, add it to the json
             # encoders for this model.
@@ -146,7 +149,6 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
             for key, attr in namespace.items():
                 if isinstance(attr, property) and attr.fset is not None:
                     cls.__property_setters__[key] = attr
-                    signals[key] = Signal(object)
         else:
             for b in cls.__bases__:
                 conf = getattr(b, "__config__", None)
@@ -157,7 +159,6 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
                     )
 
         cls.__field_dependents__ = _get_field_dependents(cls)
-        cls.__signal_group__ = type(f"{name}SignalGroup", (SignalGroup,), signals)
         return cls
 
 
@@ -298,8 +299,9 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
 
     """
 
-    # add private attributes for event emission
-    _events: ClassVar[SignalGroup] = PrivateAttr()
+    events: ClassVar = SignalGroupDescriptor(
+        patch_setattr=False, warn_on_no_fields=False
+    )
 
     # mapping of name -> property obj for methods that are property setters
     __property_setters__: ClassVar[Dict[str, property]]
@@ -308,21 +310,12 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
     __field_dependents__: ClassVar[Dict[str, Set[str]]]
     __eq_operators__: ClassVar[Dict[str, "EqOperator"]]
     __slots__ = {"__weakref__"}
-    __signal_group__: ClassVar[Type[SignalGroup]]
     # pydantic BaseModel configuration.  see:
     # https://pydantic-docs.helpmanual.io/usage/model_config/
 
     class Config:
         # this seems to be necessary for the _json_encoders trick to work
         json_encoders = {"____": None}
-
-    def __init__(_model_self_, **data: Any) -> None:
-        super().__init__(**data)
-        Group = _model_self_.__signal_group__
-        # the type error is "cannot assign to a class variable" ...
-        # but if we don't use `ClassVar`, then the `dataclass_transform` decorator
-        # will add _events: SignalGroup to the __init__ signature, for *all* user models
-        _model_self_._events = Group(_model_self_)  # type: ignore [misc]
 
     def _super_setattr_(self, name: str, value: Any) -> None:
         # pydantic will raise a ValueError if extra fields are not allowed
@@ -334,36 +327,19 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
             super().__setattr__(name, value)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if (
-            name == "_events"
-            or not hasattr(self, "_events")  # can happen on init
-            or name not in self._events.signals
-        ):
-            # fallback to default behavior
+        if name == "events":
             return self._super_setattr_(name, value)
 
-        # grab current value
-        before = getattr(self, name, object())
+        signal = getattr(self.events, name, None)
+        if signal is None:
+            return self._super_setattr_(name, value)
 
-        # set value using original setter
-        self._super_setattr_(name, value)
+        with _changes_emitted(self, name, getattr(self.events, name)) as ctx:
+            self._super_setattr_(name, value)
 
-        # if different we emit the event with new value
-        after = getattr(self, name)
-
-        if not _check_field_equality(type(self), name, after, before):
-            signal_instance: SignalInstance = getattr(self.events, name)
-            signal_instance.emit(after)  # emit event
-
-            # emit events for any dependent computed property setters as well
+        if ctx.changed:
             for dep in self.__field_dependents__.get(name, ()):
                 getattr(self.events, dep).emit(getattr(self, dep))
-
-    # expose the private SignalGroup publically
-    @property
-    def events(self) -> SignalGroup:
-        """Return the `SignalGroup` containing all events for this model."""
-        return self._events
 
     @property
     def _defaults(self) -> dict:
