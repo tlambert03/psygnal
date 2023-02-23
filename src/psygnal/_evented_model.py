@@ -54,23 +54,23 @@ GUESS_PROPERTY_DEPENDENCIES = "guess_property_dependencies"
 def no_class_attributes() -> Iterator[None]:  # pragma: no cover
     """Context in which pydantic.main.ClassAttribute just passes value 2.
 
-    Due to a very annoying decision by PySide2, all class ``__signature__``
+    Due to a very annoying decision by PySide2, all class `__signature__`
     attributes may only be assigned **once**.  (This seems to be regardless of
     whether the class has anything to do with PySide2 or not).  Furthermore,
-    the PySide2 ``__signature__`` attribute seems to break the python
+    the PySide2 `__signature__` attribute seems to break the python
     descriptor protocol, which means that class attributes that have a
-    ``__get__`` method will not be able to successfully retrieve their value
+    `__get__` method will not be able to successfully retrieve their value
     (instead, the descriptor object itself will be accessed).
 
-    This plays terribly with Pydantic, which assigns a ``ClassAttribute``
-    object to the value of ``cls.__signature__`` in ``ModelMetaclass.__new__``
+    This plays terribly with Pydantic, which assigns a `ClassAttribute`
+    object to the value of `cls.__signature__` in `ModelMetaclass.__new__`
     in order to avoid masking the call signature of object instances that have
-    a ``__call__`` method (https://github.com/samuelcolvin/pydantic/pull/1466).
+    a `__call__` method (https://github.com/samuelcolvin/pydantic/pull/1466).
 
-    So, because we only get to set the ``__signature__`` once, this context
-    manager basically "opts-out" of pydantic's ``ClassAttribute`` strategy,
-    thereby directly setting the ``cls.__signature__`` to an instance of
-    ``inspect.Signature``.
+    So, because we only get to set the `__signature__` once, this context
+    manager basically "opts-out" of pydantic's `ClassAttribute` strategy,
+    thereby directly setting the `cls.__signature__` to an instance of
+    `inspect.Signature`.
 
     For additional context, see:
     - https://github.com/napari/napari/issues/2264
@@ -99,15 +99,15 @@ def no_class_attributes() -> Iterator[None]:  # pragma: no cover
 class EventedMetaclass(pydantic.main.ModelMetaclass):
     """pydantic ModelMetaclass that preps "equality checking" operations.
 
-    A metaclass is the thing that "constructs" a class, and ``ModelMetaclass``
-    is where pydantic puts a lot of it's type introspection and ``ModelField``
+    A metaclass is the thing that "constructs" a class, and `ModelMetaclass`
+    is where pydantic puts a lot of its type introspection and `ModelField`
     creation logic.  Here, we simply tack on one more function, that builds a
-    ``cls.__eq_operators__`` dict which is mapping of field name to a function
+    `cls.__eq_operators__` dict which is mapping of field name to a function
     that can be called to check equality of the value of that field with some
-    other object.  (used in ``EventedModel.__eq__``)
+    other object.  (used in `EventedModel.__eq__`)
 
-    This happens only once, when an ``EventedModel`` class is created (and not
-    when each instance of an ``EventedModel`` is instantiated).
+    This happens only once, when an `EventedModel` class is created (and not
+    when each instance of an `EventedModel` is instantiated).
     """
 
     @no_type_check
@@ -137,12 +137,10 @@ class EventedMetaclass(pydantic.main.ModelMetaclass):
                 # https://github.com/samuelcolvin/pydantic/pull/2064
                 EventedModel.__config__.json_encoders[f.type_] = encoder
 
-        allow_props = getattr(cls.__config__, ALLOW_PROPERTY_SETTERS, False)
-
         # check for @_.setters defined on the class, so we can allow them
         # in EventedModel.__setattr__
         cls.__property_setters__ = {}
-        if allow_props:
+        if getattr(cls.__config__, ALLOW_PROPERTY_SETTERS, False):
             for b in reversed(cls.__bases__):
                 if hasattr(b, "__property_setters__"):
                     cls.__property_setters__.update(b.__property_setters__)
@@ -220,7 +218,6 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
     """A pydantic BaseModel that emits a signal whenever a field value is changed.
 
     !!! important
-
         This class requires `pydantic` to be installed.
         You can install directly (`pip install pydantic`) or by using the psygnal
         extra: `pip install psygnal[pydantic]`
@@ -262,19 +259,19 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
     --------
     Standard EventedModel example:
 
-    ```python
+    ``python
     class MyModel(EventedModel):
         x: int = 1
 
     m = MyModel()
     m.events.x.connect(lambda v: print(f'new value is {v}'))
     m.x = 3  # prints 'new value is 3'
-    ```
+    ``
 
     An example of using property_setters and emitting signals when a field dependency
     is mutated.
 
-    ```python
+    ``python
     class MyModel(EventedModel):
         a: int = 1
         b: int = 1
@@ -295,11 +292,11 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
     assert m.c == [1, 1]
     m.events.c.connect(lambda v: print(f"c updated to {v}"))
     m.a = 2  # prints 'c updated to [2, 1]'
-    ```
+    ``
 
     """
 
-    events: ClassVar = SignalGroupDescriptor(
+    events: ClassVar[SignalGroupDescriptor] = SignalGroupDescriptor(
         patch_setattr=False, warn_on_no_fields=False
     )
 
@@ -368,7 +365,7 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
         recurse : bool
             If True, recursively update fields that are EventedModels.
             Otherwise, just update the immediate fields of this EventedModel,
-            which is useful when the declared field type (e.g. ``Union``) can have
+            which is useful when the declared field type (e.g. `Union`) can have
             different realized types with different fields.
         """
         if isinstance(values, BaseModel):
@@ -388,9 +385,9 @@ class EventedModel(BaseModel, metaclass=EventedMetaclass):
         """Check equality with another object.
 
         We override the pydantic approach (which just checks
-        ``self.dict() == other.dict()``) to accommodate more complicated types
-        like arrays, whose truth value is often ambiguous. ``__eq_operators__``
-        is constructed in ``EqualityMetaclass.__new__``
+        `self.dict() == other.dict()`) to accommodate more complicated types
+        like arrays, whose truth value is often ambiguous. `__eq_operators__`
+        is constructed in `EqualityMetaclass.__new__`
         """
         if not isinstance(other, EventedModel):
             return self.dict() == other  # type: ignore
