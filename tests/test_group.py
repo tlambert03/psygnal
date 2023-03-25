@@ -3,7 +3,7 @@ from unittest.mock import Mock, call
 import pytest
 from typing_extensions import Annotated
 
-from psygnal import EmissionInfo, Signal, SignalGroup
+from psygnal import EmissionInfo, Signal, SignalGroup, SignalInstance
 
 
 class MyGroup(SignalGroup):
@@ -197,3 +197,18 @@ def test_weakref():
     del obj
     gc.collect()
     assert group.instance is None
+
+
+def test_create_subclass():
+    sig_int_str = Signal(int, str)
+    sigs: dict[str, Signal | type] = {
+        "sig1": sig_int_str,
+        "sig2": str,
+        3: int,
+    }
+    GroupCls = SignalGroup.create_subclass(sigs)
+    assert GroupCls.__name__ == "CustomSignalGroup"
+    assert GroupCls._signals_["sig1"] == sig_int_str
+
+    group = GroupCls()
+    assert isinstance(group.sig1, SignalInstance)

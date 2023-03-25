@@ -4,6 +4,8 @@ import subprocess
 import warnings
 from pathlib import Path
 
+import pytest
+
 import psygnal
 
 
@@ -14,6 +16,7 @@ def test_hook_content():
             os.path.dirname(psygnal.__file__), "_pyinstaller_util", "hook-psygnal.py"
         ),
     )
+    assert spec is not None and spec.loader is not None
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
 
@@ -28,13 +31,12 @@ def test_hook_content():
 def test_pyintstaller_hiddenimports(tmp_path: Path) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-
-        from PyInstaller import __main__ as pyi_main
+        pyi_main = pytest.importorskip("PyInstaller.__main__")
 
     build_path = tmp_path / "build"
     dist_path = tmp_path / "dist"
     app_name = "psygnal_test"
-    app = tmp_path / (app_name + ".py")
+    app = tmp_path / f"{app_name}.py"
     app.write_text("\n".join(["import psygnal", "print(psygnal.__version__)"]))
 
     args = [

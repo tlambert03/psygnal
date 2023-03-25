@@ -9,7 +9,9 @@ the args that were emitted.
 """
 from __future__ import annotations
 
+from inspect import Signature
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     ClassVar,
@@ -17,11 +19,20 @@ from typing import (
     Iterable,
     Mapping,
     NamedTuple,
+    Union,
 )
 
 from mypy_extensions import mypyc_attr
 
 from psygnal._signal import Signal, SignalInstance, _SignalBlocker
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
+
+    SignalLike: TypeAlias = Signal | type | Signature
+    SignalMap: TypeAlias = Union[
+        Mapping[str, SignalLike], Iterable[tuple[str, SignalLike]]
+    ]
 
 __all__ = ["EmissionInfo", "SignalGroup"]
 
@@ -105,6 +116,14 @@ class SignalGroup(SignalInstance):
             )
 
         return super().__init_subclass__()
+
+    @classmethod
+    def create_subclass(
+        cls, signals: SignalMap, name: str = "Custom"
+    ) -> type[SignalGroup]:
+        _sigs = dict(signals)
+        ns = {k: t if isinstance(t, Signal) else Signal(t) for k, t in _sigs.items()}
+        return type(f"{name}SignalGroup", (cls,), ns)
 
     def __init__(self, instance: Any = None, name: str | None = None) -> None:
         super().__init__(
