@@ -18,7 +18,8 @@ from typing import (
     overload,
 )
 
-from ._dataclass_utils import iter_fields
+from dataclass_compat import fields
+
 from ._group import SignalGroup
 from ._signal import Signal
 
@@ -133,14 +134,19 @@ def _build_dataclass_signal_group(
     _equality_operators = dict(equality_operators) if equality_operators else {}
     signals = {}
     eq_map = _get_eq_operator_map(cls)
-    for name, type_ in iter_fields(cls):
-        if name in _equality_operators:
-            if not callable(_equality_operators[name]):  # pragma: no cover
-                raise TypeError("EqOperator must be callable")
-            eq_map[name] = _equality_operators[name]
-        else:
-            eq_map[name] = _pick_equality_operator(type_)
-        signals[name] = Signal(object if type_ is None else type_)
+    try:
+        _fields = fields(cls)
+    except TypeError:
+        pass
+    else:
+        for field in _fields:
+            if field.name in _equality_operators:
+                if not callable(_equality_operators[field.name]):  # pragma: no cover
+                    raise TypeError("EqOperator must be callable")
+                eq_map[field.name] = _equality_operators[field.name]
+            else:
+                eq_map[field.name] = _pick_equality_operator(field.type)
+            signals[field.name] = Signal(object if field.type is None else field.type)
 
     return type(f"{cls.__name__}SignalGroup", (SignalGroup,), signals)
 
