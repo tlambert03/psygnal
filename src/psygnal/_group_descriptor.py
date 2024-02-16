@@ -18,7 +18,8 @@ from typing import (
     overload,
 )
 
-from ._dataclass_utils import iter_fields
+import fieldz
+
 from ._group import SignalGroup
 from ._signal import Signal, SignalInstance
 
@@ -147,15 +148,20 @@ def _build_dataclass_signal_group(
     signals = {}
     eq_map = _get_eq_operator_map(cls)
     # create a Signal for each field in the dataclass
-    for name, type_ in iter_fields(cls):
-        if name in _equality_operators:
-            if not callable(_equality_operators[name]):  # pragma: no cover
+    try:
+        iter_fields = fieldz.fields(cls)
+    except TypeError:  # fieldz raises a TypeError if cls is not a dataclass-like
+        iter_fields = ()
+
+    for field in iter_fields:
+        if field.name in _equality_operators:
+            if not callable(_equality_operators[field.name]):  # pragma: no cover
                 raise TypeError("EqOperator must be callable")
-            eq_map[name] = _equality_operators[name]
+            eq_map[field.name] = _equality_operators[field.name]
         else:
-            eq_map[name] = _pick_equality_operator(type_)
-        field_type = object if type_ is None else type_
-        signals[name] = sig = Signal(field_type, field_type)
+            eq_map[field.name] = _pick_equality_operator(field.type)
+        field_type = object if field.type is None else field.type
+        signals[field.name] = sig = Signal(field_type, field_type)
         # patch in our custom SignalInstance class with maxargs=1 on connect_setattr
         sig._signal_instance_class = _DataclassFieldSignalInstance
 
