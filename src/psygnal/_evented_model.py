@@ -21,7 +21,11 @@ import pydantic
 from pydantic import PrivateAttr
 
 from ._group import SignalGroup
-from ._group_descriptor import _check_field_equality, _pick_equality_operator
+from ._group_descriptor import (
+    SignalGroupDescriptor,
+    _check_field_equality,
+    _pick_equality_operator,
+)
 from ._signal import Signal
 
 PYDANTIC_V1 = pydantic.version.VERSION.startswith("1")
@@ -190,18 +194,20 @@ class ComparisonDelayer:
 class EventedMetaclass(pydantic_main.ModelMetaclass):
     """pydantic ModelMetaclass that preps "equality checking" operations.
 
-    A metaclass is the thing that "constructs" a class, and ``ModelMetaclass``
-    is where pydantic puts a lot of it's type introspection and ``ModelField``
-    creation logic.  Here, we simply tack on one more function, that builds a
-    ``cls.__eq_operators__`` dict which is mapping of field name to a function
-    that can be called to check equality of the value of that field with some
-    other object.  (used in ``EventedModel.__eq__``)
+    A metaclass is the thing that "constructs" a class, and ``ModelMetaclass`` is where
+    pydantic puts a lot of it's type introspection and ``ModelField`` creation logic.
+    Here, we simply tack on one more function, that builds a ``cls.__eq_operators__``
+    dict which is mapping of field name to a function that can be called to check
+    equality of the value of that field with some other object.  (used in
+    ``EventedModel.__eq__``)
 
-    This happens only once, when an ``EventedModel`` class is created (and not
-    when each instance of an ``EventedModel`` is instantiated).
+    This happens only once, when an ``EventedModel`` class is created (and not when each
+    instance of an ``EventedModel`` is instantiated).
     """
 
     __property_setters__: Dict[str, property]
+    __recursion_map__: Mapping[str, "RecursionMode"]
+    __recursion_default__: "RecursionMode"
 
     @no_type_check
     def __new__(
@@ -236,6 +242,9 @@ class EventedMetaclass(pydantic_main.ModelMetaclass):
                     "of field names to 'immediate' or 'deferred'."
                 )
             recursion_map = recursion_cfg
+
+        cls.__recursion_map__ = recursion_map
+        cls.__recursion_default__ = default_recursion
 
         for n, f in model_fields.items():
             cls.__eq_operators__[n] = _pick_equality_operator(f.annotation)
@@ -285,8 +294,8 @@ class EventedMetaclass(pydantic_main.ModelMetaclass):
             cls, model_config, model_fields
         )
         cls.__signal_group__ = type(f"{name}SignalGroup", (SignalGroup,), signals)
-        if not cls.__field_dependents__ and hasattr(cls, "_setattr_no_dependants"):
-            cls._setattr_default = cls._setattr_no_dependants
+        if not cls.__field_dependents__ and hasattr(cls, "_super_setattr_"):
+            cls._setattr_default = cls._super_setattr_
         elif hasattr(cls, "_setattr_with_dependents"):
             cls._setattr_default = cls._setattr_with_dependents
         return cls
@@ -447,7 +456,9 @@ class EventedModel(pydantic.BaseModel, metaclass=EventedMetaclass):
     """
 
     # add private attributes for event emission
-    _events: ClassVar[SignalGroup] = PrivateAttr()
+    _events: ClassVar[SignalGroupDescriptor] = SignalGroupDescriptor(
+        emit_previous=False, patch_setattr=False
+    )
 
     # mapping of name -> property obj for methods that are property setters
     __property_setters__: ClassVar[Dict[str, property]]
@@ -466,14 +477,6 @@ class EventedModel(pydantic.BaseModel, metaclass=EventedMetaclass):
         class Config:
             # this seems to be necessary for the _json_encoders trick to work
             json_encoders: ClassVar[dict] = {"____": None}
-
-    def __init__(_model_self_, **data: Any) -> None:
-        super().__init__(**data)
-        Group = _model_self_.__signal_group__
-        # the type error is "cannot assign to a class variable" ...
-        # but if we don't use `ClassVar`, then the `dataclass_transform` decorator
-        # will add _events: SignalGroup to the __init__ signature, for *all* user models
-        _model_self_._events = Group(_model_self_)  # type: ignore [misc]
 
     # expose the private SignalGroup publicly
     @property
@@ -579,7 +582,7 @@ class EventedModel(pydantic.BaseModel, metaclass=EventedMetaclass):
         with ComparisonDelayer(self):
             # Again delay comparison to avoid having events caused by callback functions
             for name, new_value in to_emit:
-                getattr(self._events, name)(new_value)
+                self._events[name].emit(new_value)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if (
@@ -590,7 +593,7 @@ class EventedModel(pydantic.BaseModel, metaclass=EventedMetaclass):
             # fallback to default behavior
             return self._super_setattr_(name, value)
         # the _setattr_default method is overridden in __new__ to be one of
-        # `_setattr_no_dependants` or `_setattr_with_dependents`.
+        # `_super_setattr_` or `_setattr_with_dependents`.
         self._setattr_default(name, value)
 
     def _super_setattr_(self, name: str, value: Any) -> None:
@@ -608,21 +611,10 @@ class EventedModel(pydantic.BaseModel, metaclass=EventedMetaclass):
     def _setattr_default(self, name: str, value: Any) -> None:
         """Will be overwritten by metaclass __new__.
 
-        It will become either `_setattr_no_dependants` (if the class has no
+        It will become either `_super_setattr_` (if the class has no
         properties and `__field_dependents__`), or `_setattr_with_dependents` if it
         does.
         """
-
-    def _setattr_no_dependants(self, name: str, value: Any) -> None:
-        """__setattr__ behavior when the class has no properties."""
-        group = self._events
-        signal_instance: SignalInstance = group[name]
-        if len(signal_instance) < 1:
-            return self._super_setattr_(name, value)
-        old_value = getattr(self, name, object())
-        self._super_setattr_(name, value)
-        if not _check_field_equality(type(self), name, value, old_value):
-            getattr(self._events, name)(value)
 
     def _setattr_with_dependents(self, name: str, value: Any) -> None:
         """__setattr__ behavior when the class does properties."""

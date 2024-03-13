@@ -21,7 +21,7 @@ from typing import (
 
 from ._dataclass_utils import iter_fields
 from ._group import SignalGroup
-from ._signal import Signal, SignalInstance
+from ._signal import DEFAULT_RECURSION_MODE, Signal, SignalInstance
 
 if TYPE_CHECKING:
     from _weakref import ref as ref
@@ -146,6 +146,7 @@ def _build_dataclass_signal_group(
     cls: type,
     signal_group_class: type[SignalGroup],
     equality_operators: Iterable[tuple[str, EqOperator]] | None = None,
+    emit_previous: bool = True,
 ) -> type[SignalGroup]:
     """Build a SignalGroup with events for each field in a dataclass.
 
@@ -164,6 +165,10 @@ def _build_dataclass_signal_group(
     _equality_operators = dict(equality_operators) if equality_operators else {}
     signals = {}
     eq_map = _get_eq_operator_map(cls)
+
+    recursion_map = getattr(cls, "__recursion_map__", {})
+    recursion_default = getattr(cls, "__recursion_default__", DEFAULT_RECURSION_MODE)
+
     # create a Signal for each field in the dataclass
     for name, type_ in iter_fields(cls):
         if name in _equality_operators:
@@ -173,9 +178,17 @@ def _build_dataclass_signal_group(
         else:
             eq_map[name] = _pick_equality_operator(type_)
         field_type = object if type_ is None else type_
-        signals[name] = sig = Signal(field_type, field_type)
+        args = (field_type, field_type) if emit_previous else (field_type,)
+        recursion_mode = recursion_map.get(name, recursion_default)
+        signals[name] = sig = Signal(*args, recursion_mode=recursion_mode)
         # patch in our custom SignalInstance class with maxargs=1 on connect_setattr
         sig._signal_instance_class = _DataclassFieldSignalInstance
+
+    if hasattr(cls, "__property_setters__"):
+        for key in cls.__property_setters__:
+            recursion = recursion_map.get(key, recursion_default)
+            args = (object, object) if emit_previous else (object,)
+            signals[key] = Signal(*args, recursion_mode=recursion)
 
     # Create `signal_group_class` subclass with the attached signals
     group_name = f"{cls.__name__}{signal_group_class.__name__}"
@@ -215,10 +228,17 @@ def get_evented_namespace(obj: object) -> str | None:
 
 
 class _changes_emitted:
-    def __init__(self, obj: object, field: str, signal: SignalInstance) -> None:
+    def __init__(
+        self,
+        obj: object,
+        field: str,
+        signal: SignalInstance,
+        emit_previous: bool = True,
+    ) -> None:
         self.obj = obj
         self.field = field
         self.signal = signal
+        self.emit_previous = emit_previous
 
     def __enter__(self) -> None:
         self._prev = getattr(self.obj, self.field, _NULL)
@@ -226,24 +246,33 @@ class _changes_emitted:
     def __exit__(self, *args: Any) -> None:
         new: Any = getattr(self.obj, self.field, _NULL)
         if not _check_field_equality(type(self.obj), self.field, self._prev, new):
-            self.signal.emit(new, self._prev)
+            if self.emit_previous:
+                self.signal.emit(new, self._prev)
+            else:
+                self.signal.emit(new)
 
 
 SetAttr = Callable[[Any, str, Any], None]
 
 
 @overload
-def evented_setattr(signal_group_name: str, super_setattr: SetAttr) -> SetAttr: ...
+def evented_setattr(
+    signal_group_name: str, super_setattr: SetAttr, emit_previous: bool = ...
+) -> SetAttr: ...
 
 
 @overload
 def evented_setattr(
-    signal_group_name: str, super_setattr: Literal[None] | None = None
+    signal_group_name: str,
+    super_setattr: Literal[None] | None = None,
+    emit_previous: bool = ...,
 ) -> Callable[[SetAttr], SetAttr]: ...
 
 
 def evented_setattr(
-    signal_group_name: str, super_setattr: SetAttr | None = None
+    signal_group_name: str,
+    super_setattr: SetAttr | None = None,
+    emit_previous: bool = True,
 ) -> SetAttr | Callable[[SetAttr], SetAttr]:
     """Create a new __setattr__ method that emits events when fields change.
 
@@ -294,7 +323,7 @@ def evented_setattr(
             if len(signal) < 1:
                 return super_setattr(self, name, value)
 
-            with _changes_emitted(self, name, signal):
+            with _changes_emitted(self, name, signal, emit_previous=emit_previous):
                 super_setattr(self, name, value)
 
         setattr(_setattr_and_emit_, PATCHED_BY_PSYGNAL, True)
@@ -409,6 +438,7 @@ class SignalGroupDescriptor:
         patch_setattr: bool = True,
         signal_group_class: type[SignalGroup] | None = None,
         collect_fields: bool = True,
+        emit_previous: bool = True,
     ):
         grp_cls = signal_group_class or SignalGroup
         if not (isinstance(grp_cls, type) and issubclass(grp_cls, SignalGroup)):
@@ -427,6 +457,7 @@ class SignalGroupDescriptor:
         self._warn_on_no_fields = warn_on_no_fields
         self._cache_on_instance = cache_on_instance
         self._patch_setattr = patch_setattr
+        self._emit_previous = emit_previous
 
         self._signal_group_class: type[SignalGroup] = grp_cls
         self._collect_fields = collect_fields
@@ -451,6 +482,7 @@ class SignalGroupDescriptor:
             owner.__setattr__ = evented_setattr(  # type: ignore
                 cast(str, self._name),
                 owner.__setattr__,  # type: ignore
+                emit_previous=self._emit_previous,
             )
         except Exception as e:  # pragma: no cover
             # not sure what might cause this ... but it will have consequences
@@ -507,7 +539,10 @@ class SignalGroupDescriptor:
         # Collect fields and create SignalGroup subclass
         else:
             Group = _build_dataclass_signal_group(
-                owner, self._signal_group_class, equality_operators=self._eqop
+                owner,
+                self._signal_group_class,
+                equality_operators=self._eqop,
+                emit_previous=self._emit_previous,
             )
         if self._warn_on_no_fields and not Group._psygnal_signals:
             warnings.warn(

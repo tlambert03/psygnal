@@ -426,11 +426,11 @@ class T(EventedModel):
         return [self.a, self.b]
 
     @c.setter
-    def c(self, val: Sequence[int]):
+    def c(self, val: Sequence[int]) -> None:
         self.a, self.b = val
 
     if PYDANTIC_V2:
-        model_config = {
+        model_config = {  # type: ignore
             "allow_property_setters": True,
             "guess_property_dependencies": True,
         }
