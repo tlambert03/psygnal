@@ -143,6 +143,7 @@ from typing import (
     ClassVar,
     ContextManager,
     Final,
+    Generic,
     Iterable,
     Iterator,
     Literal,
@@ -215,7 +216,14 @@ class ReemissionMode:
         return VALID_REEMISSION
 
 
-class Signal:
+FuncT = TypeVar("FuncT", bound=Callable[..., Any])
+T1 = TypeVar("T1")
+T2 = TypeVar("T2")
+T3 = TypeVar("T3")
+T4 = TypeVar("T4")
+
+
+class Signal(Generic[FuncT]):
     """Declares a signal emitter on a class.
 
     This is class implements the [descriptor
@@ -288,9 +296,79 @@ class Signal:
 
     _current_emitter: ClassVar[SignalInstance | None] = None
 
+    @overload
+    def __init__(
+        self: Signal[Callable[[], Any]],
+        *,
+        description: str = ...,
+        name: str | None = ...,
+        check_nargs_on_connect: bool = ...,
+        check_types_on_connect: bool = ...,
+        reemission: ReemissionVal = ...,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self: Signal[Callable[[], Any] | Callable[[T1], Any]],
+        t1: type[T1],
+        *,
+        description: str = ...,
+        name: str | None = ...,
+        check_nargs_on_connect: bool = ...,
+        check_types_on_connect: bool = ...,
+        reemission: ReemissionVal = ...,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self: Signal[Callable[[], Any] | Callable[[T1], Any] | Callable[[T1, T2], Any]],
+        t1: type[T1],
+        t2: type[T2],
+        *,
+        description: str = ...,
+        name: str | None = ...,
+        check_nargs_on_connect: bool = ...,
+        check_types_on_connect: bool = ...,
+        reemission: ReemissionVal = ...,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self: Signal[
+            Callable[[], Any]
+            | Callable[[T1], Any]
+            | Callable[[T1, T2], Any]
+            | Callable[[T1, T2, T3], Any]
+        ],
+        t1: type[T1],
+        t2: type[T2],
+        t3: type[T3],
+        *,
+        description: str = ...,
+        name: str | None = ...,
+        check_nargs_on_connect: bool = ...,
+        check_types_on_connect: bool = ...,
+        reemission: ReemissionVal = ...,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self: Signal[
+            Callable[[], Any] | Callable[[T1], Any],
+            Callable[[T1, T2], Any],
+            Callable[[T1, T2, T3], Any],
+            Callable[[T1, T2, T4], Any],
+        ],
+        t1: type[T1],
+        t2: type[T2],
+        t3: type[T3],
+        t4: type[T4],
+        *,
+        description: str = ...,
+        name: str | None = ...,
+        check_nargs_on_connect: bool = ...,
+        check_types_on_connect: bool = ...,
+        reemission: ReemissionVal = ...,
+    ) -> None: ...
     def __init__(
         self,
-        *types: type[Any] | Signature,
+        *types: type[Any],
         description: str = "",
         name: str | None = None,
         check_nargs_on_connect: bool = True,
@@ -327,16 +405,18 @@ class Signal:
             self._name = name
 
     @overload
-    def __get__(self, instance: None, owner: type[Any] | None = None) -> Signal: ...
+    def __get__(
+        self, instance: None, owner: type[Any] | None = None
+    ) -> Signal[FuncT]: ...
 
     @overload
     def __get__(
         self, instance: Any, owner: type[Any] | None = None
-    ) -> SignalInstance: ...
+    ) -> SignalInstance[FuncT]: ...
 
     def __get__(
         self, instance: Any, owner: type[Any] | None = None
-    ) -> Signal | SignalInstance:
+    ) -> Signal[FuncT] | SignalInstance[FuncT]:
         """Get signal instance.
 
         This is called when accessing a Signal instance.  If accessed as an
@@ -441,7 +521,7 @@ _empty_signature = Signature()
 
 
 @mypyc_attr(allow_interpreted_subclasses=True)
-class SignalInstance:
+class SignalInstance(Generic[FuncT]):
     """A signal instance (optionally) bound to an object.
 
     In most cases, users will not create a `SignalInstance` directly -- instead
@@ -594,7 +674,7 @@ class SignalInstance:
     @overload
     def connect(
         self,
-        slot: F,
+        slot: FuncT,
         *,
         thread: threading.Thread | Literal["main", "current"] | None = ...,
         check_nargs: bool | None = ...,
@@ -603,11 +683,11 @@ class SignalInstance:
         max_args: int | None = None,
         on_ref_error: RefErrorChoice = ...,
         priority: int = ...,
-    ) -> F: ...
+    ) -> FuncT: ...
 
     def connect(
         self,
-        slot: F | None = None,
+        slot: FuncT | None = None,
         *,
         thread: threading.Thread | Literal["main", "current"] | None = None,
         check_nargs: bool | None = None,
@@ -616,7 +696,7 @@ class SignalInstance:
         max_args: int | None = None,
         on_ref_error: RefErrorChoice = "warn",
         priority: int = 0,
-    ) -> Callable[[F], F] | F:
+    ) -> Callable[[FuncT], FuncT] | FuncT:
         """Connect a callback (`slot`) to this signal.
 
         `slot` is compatible if:
@@ -701,10 +781,10 @@ class SignalInstance:
             check_types = self._check_types_on_connect
 
         def _wrapper(
-            slot: F,
+            slot: FuncT,
             max_args: int | None = max_args,
             _on_ref_err: RefErrorChoice = on_ref_error,
-        ) -> F:
+        ) -> FuncT:
             if not callable(slot):
                 raise TypeError(f"Cannot connect to non-callable object: {slot}")
 
