@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from psygnal import Signal
-from psygnal._signal import _guess_qtsignal_signature
+from psygnal.uncompiled._signal import _guess_qtsignal_signature
 
 pytest.importorskip("pytestqt")
 if TYPE_CHECKING:

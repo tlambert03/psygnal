@@ -14,7 +14,7 @@ except ImportError:
     Annotated = None
 
 from psygnal import EmissionInfo, Signal, SignalGroup, SignalInstance
-from psygnal._group import SignalRelay
+from psygnal.uncompiled._group import SignalRelay
 
 
 class MyGroup(SignalGroup):

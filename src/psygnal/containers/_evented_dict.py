@@ -21,8 +21,8 @@ from typing import (
 if TYPE_CHECKING:
     from typing_extensions import Self
 
-from psygnal._group import SignalGroup
-from psygnal._signal import Signal
+from psygnal.uncompiled._group import SignalGroup
+from psygnal.uncompiled._signal import Signal
 
 _K = TypeVar("_K")
 _V = TypeVar("_V")

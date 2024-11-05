@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import pytest
 from attr import define
 
-from psygnal import _dataclass_utils
+from psygnal.uncompiled import _dataclass_utils
 
 try:
     from msgspec import Struct

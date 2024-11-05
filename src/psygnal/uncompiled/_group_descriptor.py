@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import TypeAlias
 
-    from psygnal._weak_callback import RefErrorChoice, WeakCallback
+    from ._weak_callback import RefErrorChoice, WeakCallback
 
     EqOperator: TypeAlias = Callable[[Any, Any], bool]
     FieldAliasFunc: TypeAlias = Callable[[str], Optional[str]]

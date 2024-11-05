@@ -38,8 +38,8 @@ from typing import (
     overload,
 )
 
-from psygnal._group import EmissionInfo, SignalGroup, SignalRelay
-from psygnal._signal import Signal, SignalInstance
+from psygnal.uncompiled._group import EmissionInfo, SignalGroup, SignalRelay
+from psygnal.uncompiled._signal import Signal, SignalInstance
 from psygnal.utils import iter_signal_instances
 
 _T = TypeVar("_T")

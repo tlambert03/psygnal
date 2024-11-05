@@ -11,8 +11,8 @@ import pytest
 
 import psygnal
 from psygnal import EmitLoopError, Signal, SignalInstance
-from psygnal._signal import ReemissionMode, ReemissionVal
-from psygnal._weak_callback import WeakCallback
+from psygnal.uncompiled._signal import ReemissionMode, ReemissionVal
+from psygnal.uncompiled._weak_callback import WeakCallback
 
 PY39 = sys.version_info[:2] == (3, 9)
 WINDOWS = os.name == "nt"

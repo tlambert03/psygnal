@@ -16,8 +16,8 @@ import pydantic.version
 from pydantic import BaseModel
 
 from psygnal import EmissionInfo, EventedModel
-from psygnal._group import SignalGroup
-from psygnal._signal import ReemissionMode
+from psygnal.uncompiled._group import SignalGroup
+from psygnal.uncompiled._signal import ReemissionMode
 
 PYDANTIC_V2 = pydantic.version.VERSION.startswith("2")
 

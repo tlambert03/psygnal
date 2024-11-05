@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Container, TypeVar
 
-from psygnal._signal import Signal
+from psygnal.uncompiled._signal import Signal
 
 from ._evented_set import BailType, EventedOrderedSet, SetEvents
 

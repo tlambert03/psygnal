@@ -8,7 +8,7 @@ from weakref import ref
 import pytest
 
 from psygnal import SignalInstance
-from psygnal._weak_callback import WeakCallback, weak_callback
+from psygnal.uncompiled._weak_callback import WeakCallback, weak_callback
 
 
 @pytest.mark.parametrize(
@@ -181,7 +181,7 @@ def test_deref(strong: bool) -> None:
 
 
 def test_queued_callbacks() -> None:
-    from psygnal._queue import QueuedCallback
+    from psygnal.uncompiled._queue import QueuedCallback
 
     def func(x):
         return x

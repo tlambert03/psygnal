@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from threading import Thread, current_thread
 
-from ._queue import emit_queued
+from .uncompiled._queue import emit_queued
 
 try:
     from qtpy.QtCore import Qt, QTimer

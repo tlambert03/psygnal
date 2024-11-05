@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterator
 from warnings import warn
 
-from ._group import EmissionInfo, SignalGroup
-from ._signal import SignalInstance
+from .uncompiled._group import EmissionInfo, SignalGroup
+from .uncompiled._signal import SignalInstance
 
 __all__ = ["monitor_events", "iter_signal_instances"]
 

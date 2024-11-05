@@ -87,6 +87,8 @@ include = ["src", "tests", "CHANGELOG.md"]
 only-include = ["src"]
 sources = ["src"]
 
+[tool.hatch.build.targets.wheel.hooks.custom]
+
 [tool.hatch.build.targets.wheel.hooks.mypyc]
 mypy-args = ["--ignore-missing-imports"]
 enable-by-default = false
@@ -99,14 +101,14 @@ dependencies = [
     "types-attrs",
     "msgspec",
 ]
-exclude = [
-    "src/psygnal/__init__.py",
-    "src/psygnal/_evented_model.py",
-    "src/psygnal/utils.py",
-    "src/psygnal/containers",
-    "src/psygnal/qt.py",
-    "src/psygnal/_pyinstaller_util",
-    "src/psygnal/_throttler.py",
+include = [
+    "src/psygnal/compiled",
+    # "src/psygnal/_evented_model.py",
+    # "src/psygnal/utils.py",
+    # "src/psygnal/containers",
+    # "src/psygnal/qt.py",
+    # "src/psygnal/_pyinstaller_util",
+    # "src/psygnal/_throttler.py",
 ]
 
 [tool.cibuildwheel]

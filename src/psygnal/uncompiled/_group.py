@@ -26,15 +26,14 @@ from typing import (
     overload,
 )
 
-from psygnal._signal import _NULL, Signal, SignalInstance, _SignalBlocker
-
 from ._mypyc import mypyc_attr
+from ._signal import _NULL, Signal, SignalInstance, _SignalBlocker
 
 if TYPE_CHECKING:
     import threading
 
-    from psygnal._signal import F, ReducerFunc
-    from psygnal._weak_callback import RefErrorChoice, WeakCallback
+    from ._signal import F, ReducerFunc
+    from ._weak_callback import RefErrorChoice, WeakCallback
 
 __all__ = ["EmissionInfo", "SignalGroup"]
 

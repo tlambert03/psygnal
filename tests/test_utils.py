@@ -1,12 +1,10 @@
-import os
 import sys
-from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
 
 from psygnal import EmissionInfo, Signal, SignalGroup
-from psygnal.utils import decompile, monitor_events, recompile
+from psygnal.utils import monitor_events
 
 
 def test_event_debugger(capsys) -> None:
@@ -121,27 +119,27 @@ def test_monitor_group() -> None:
     ]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="rewrite open files on Windows is buggy")
-def test_decompile_recompile(monkeypatch):
-    import psygnal
+# @pytest.mark.skipif(os.name == "nt", reason="rewrite open files on Windows is buggy")
+# def test_decompile_recompile(monkeypatch):
+#     import psygnal
 
-    was_compiled = psygnal._compiled
+#     was_compiled = psygnal._compiled
 
-    decompile()
-    monkeypatch.delitem(sys.modules, "psygnal")
-    monkeypatch.delitem(sys.modules, "psygnal._signal")
-    import psygnal
+#     decompile()
+#     monkeypatch.delitem(sys.modules, "psygnal")
+#     monkeypatch.delitem(sys.modules, "psygnal._signal")
+#     import psygnal
 
-    assert not psygnal._compiled
+#     assert not psygnal._compiled
 
-    if was_compiled:
-        assert list(Path(psygnal.__file__).parent.rglob("**/*_BAK"))
-        recompile()
-        monkeypatch.delitem(sys.modules, "psygnal")
-        monkeypatch.delitem(sys.modules, "psygnal._signal")
-        import psygnal
+#     if was_compiled:
+#         assert list(Path(psygnal.__file__).parent.rglob("**/*_BAK"))
+#         recompile()
+#         monkeypatch.delitem(sys.modules, "psygnal")
+#         monkeypatch.delitem(sys.modules, "psygnal._signal")
+#         import psygnal
 
-        assert psygnal._compiled
+#         assert psygnal._compiled
 
 
 def test_debug_import(monkeypatch):

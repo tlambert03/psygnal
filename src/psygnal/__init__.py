@@ -48,13 +48,17 @@ if os.getenv("PSYGNAL_UNCOMPILED"):
         stacklevel=2,
     )
 
-from ._evented_decorator import evented
-from ._exceptions import EmitLoopError
-from ._group import EmissionInfo, SignalGroup
-from ._group_descriptor import SignalGroupDescriptor, get_evented_namespace, is_evented
-from ._queue import emit_queued
-from ._signal import Signal, SignalInstance, _compiled
 from ._throttler import debounced, throttled
+from .compiled._evented_decorator import evented
+from .compiled._exceptions import EmitLoopError
+from .compiled._group import EmissionInfo, SignalGroup
+from .compiled._group_descriptor import (
+    SignalGroupDescriptor,
+    get_evented_namespace,
+    is_evented,
+)
+from .compiled._queue import emit_queued
+from .compiled._signal import Signal, SignalInstance, _compiled
 
 
 def __getattr__(name: str) -> Any:  # pragma: no cover

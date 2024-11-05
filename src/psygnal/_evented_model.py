@@ -20,9 +20,9 @@ from typing import (
 import pydantic
 from pydantic import PrivateAttr
 
-from ._group import SignalGroup
-from ._group_descriptor import _check_field_equality, _pick_equality_operator
-from ._signal import ReemissionMode, Signal
+from .uncompiled._group import SignalGroup
+from .uncompiled._group_descriptor import _check_field_equality, _pick_equality_operator
+from .uncompiled._signal import ReemissionMode, Signal
 
 PYDANTIC_V1 = pydantic.version.VERSION.startswith("1")
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from pydantic._internal import _utils as utils
     from typing_extensions import dataclass_transform as dataclass_transform  # py311
 
-    from ._signal import SignalInstance
+    from .uncompiled._signal import SignalInstance
 
     EqOperator = Callable[[Any, Any], bool]
 else:

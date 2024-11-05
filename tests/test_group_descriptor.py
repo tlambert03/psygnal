@@ -10,8 +10,8 @@ from psygnal import (
     SignalGroup,
     SignalGroupDescriptor,
     _compiled,
-    _group_descriptor,
 )
+from psygnal.uncompiled import _group_descriptor
 
 
 class MyGroup(SignalGroup):
