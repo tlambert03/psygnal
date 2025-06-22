@@ -346,8 +346,7 @@ def test_nesting() -> None:
     info: EmissionInfo = mock.call_args[0][0]
 
     mock.assert_called_with(expected)
-
-    assert info.flatten().loc == ("bar", "foo", "x")
+    assert info.flatten().path == ("bar", "foo", "x")
 
 
 def test_signal_relay_partial():
