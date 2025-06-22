@@ -25,7 +25,6 @@ cover this in test_evented_list.py)
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, MutableSequence
-from inspect import Signature
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -46,6 +45,8 @@ _T = TypeVar("_T")
 Index = Union[int, slice]
 
 if TYPE_CHECKING:
+    from inspect import Signature
+
     from typing_extensions import Self
 
 

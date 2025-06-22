@@ -302,6 +302,7 @@ def test_move_multiple_mimics_slice_reorder():
     el.move_multiple(new_order)
     assert el == expected
 
+
 @pytest.mark.skip
 def test_child_events():
     """Test that evented lists bubble child events."""
@@ -334,6 +335,7 @@ def test_child_events():
 
     del root[0]
     assert len(e_obj.test) == 0
+
 
 @pytest.mark.skip
 def test_child_events_groups():

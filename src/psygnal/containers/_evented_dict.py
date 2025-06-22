@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
-from inspect import Signature
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, TypeVar, Union, get_args
 
 if TYPE_CHECKING:
+    from inspect import Signature
+
     from typing_extensions import Self
 
 from psygnal._group import EmissionInfo, PathStep, SignalGroup

@@ -18,8 +18,6 @@ from typing import (
     overload,
 )
 
-from psygnal._group import EmissionInfo
-
 from ._dataclass_utils import iter_fields
 from ._group import PathStep, SignalGroup
 from ._signal import Signal, SignalInstance
@@ -30,6 +28,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import TypeAlias
 
+    from psygnal._group import EmissionInfo
     from psygnal._weak_callback import RefErrorChoice, WeakCallback
 
     EqOperator: TypeAlias = Callable[[Any, Any], bool]
