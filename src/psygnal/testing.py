@@ -105,11 +105,22 @@ class SignalTester:
         super().__init__()
         self.mock = Mock()
         if isinstance(signal, SignalGroup):
-            signal_instance: SignalInstance = signal._psygnal_relay
+            signal_instance = signal._psygnal_relay
         else:
             signal_instance = signal
-        self.signal_instance: SignalInstance = signal_instance
-        self.connect_kwargs = connect_kwargs or {}
+        self.signal_instance = signal_instance
+
+        # Filter psygnal-specific kwargs for non-psygnal signal proxies
+        kwargs = dict(connect_kwargs or {})
+        if not isinstance(signal_instance, SignalInstance):
+            _PSYGNAL_ONLY_KWARGS = {
+                "thread",
+                "on_ref_error",
+                "emit_on_evented_child_events",
+            }
+            for k in _PSYGNAL_ONLY_KWARGS:
+                kwargs.pop(k, None)
+        self.connect_kwargs = kwargs
 
     def reset(self) -> None:
         """Reset the underlying mock object."""

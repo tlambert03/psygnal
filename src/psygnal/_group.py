@@ -561,6 +561,28 @@ class SignalGroup:
         return f"<SignalGroup {name!r}{owner_repr} with {len(self)} signals>"
 
     @classmethod
+    def for_backend(cls, backend: str = "auto") -> type[SignalGroup]:
+        """Return a signal group class using the specified backend.
+
+        Parameters
+        ----------
+        backend : str
+            ``"auto"`` (default), ``"qt"``, or ``"psygnal"``.
+        """
+        if backend == "psygnal":
+            return cls
+        if backend == "auto":
+            from psygnal._qt_backend import _detect_qt_backend
+
+            backend = _detect_qt_backend()
+            if backend == "psygnal":
+                return cls
+        # backend == "qt"
+        from psygnal._qt_backend import _create_qsignal_group_class
+
+        return _create_qsignal_group_class(cls)
+
+    @classmethod
     def psygnals_uniform(cls) -> bool:
         """Return true if all signals in the group have the same signature."""
         return cls._psygnal_uniform

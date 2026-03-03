@@ -115,6 +115,7 @@ exclude = [
     "src/psygnal/utils.py",
     "src/psygnal/containers",
     "src/psygnal/qt.py",
+    "src/psygnal/_qt_backend.py",
     "src/psygnal/_pyinstaller_util",
     "src/psygnal/_throttler.py",
     "src/psygnal/_async.py",
